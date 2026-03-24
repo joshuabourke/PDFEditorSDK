@@ -15,17 +15,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "PDFEditorSDK",
-            path: "PDFEditorSDKDemo",
-            exclude: [
-                "App",
-                "Resources"
-            ],
-            sources: [
-                "SDK/Public",
-                "SDK/Editor",
-                "SDK/Support"
-            ]
+            name: "PDFEditorSDK"
         )
     ]
 )
