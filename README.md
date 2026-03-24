@@ -16,7 +16,7 @@
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/your-org/PDFEditorSDK.git", from: "1.0.0")
+    .package(url: "https://github.com/joshuabourke/PDFEditorSDK.git", from: "1.0.0")
 ],
 targets: [
     .target(
