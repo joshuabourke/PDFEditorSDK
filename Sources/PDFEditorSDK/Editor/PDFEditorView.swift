@@ -1757,7 +1757,6 @@ struct PDFBrowseView: View {
 
 // MARK: - Pencil Drawing Gesture Recognizer
 
-@MainActor
 protocol PencilDrawingGestureDelegate: AnyObject {
     func pencilTouchBegan(_ touch: UITouch, with event: UIEvent?)
     func pencilTouchMoved(_ touch: UITouch, with event: UIEvent?)
@@ -1801,7 +1800,7 @@ class PencilDrawingGestureRecognizer: UIGestureRecognizer {
 }
 
 // MARK: - Drawing PDF View
-class DrawingPDFView: PDFView, @preconcurrency UIIndirectScribbleInteractionDelegate, PencilDrawingGestureDelegate {
+class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDrawingGestureDelegate {
     
     // MARK: - Properties
     weak var formViewModel: PDFFormViewModel?
