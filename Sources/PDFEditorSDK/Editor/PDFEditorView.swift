@@ -3250,16 +3250,19 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if let selectedTextBoxID, let state = overlayTextBoxState(id: selectedTextBoxID) {
             removeOverlayTextBox(id: selectedTextBoxID)
             formViewModel?.didMakeChange(.overlayTextBox(add: nil, remove: state))
+            formViewModel?.selectedOverlayKind = nil
             return
         }
         if let selectedImageBoxID, let state = overlayImageState(id: selectedImageBoxID) {
             removeOverlayImage(id: selectedImageBoxID)
             formViewModel?.didMakeChange(.overlayImage(add: nil, remove: state))
+            formViewModel?.selectedOverlayKind = nil
             return
         }
         if let selectedShapeID, let state = overlayShapeState(id: selectedShapeID) {
             removeOverlayShape(id: selectedShapeID)
             formViewModel?.didMakeChange(.overlayShape(add: nil, remove: state))
+            formViewModel?.selectedOverlayKind = nil
         }
     }
 
@@ -4717,25 +4720,27 @@ final class ShapeBoxView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        ctx.setStrokeColor(strokeColor.cgColor)
-        ctx.setLineWidth(lineWidth)
-        ctx.setLineCap(.round)
-        ctx.setLineJoin(.round)
-
+        strokeColor.setStroke()
         let insetRect = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
         switch shapeKind {
         case .circle:
-            UIBezierPath(ovalIn: insetRect).stroke()
+            let path = UIBezierPath(ovalIn: insetRect)
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
         case .rectangle:
-            UIBezierPath(roundedRect: insetRect, cornerRadius: 4).stroke()
+            let path = UIBezierPath(roundedRect: insetRect, cornerRadius: 4)
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
         case .triangle:
             let path = UIBezierPath()
             path.move(to: CGPoint(x: insetRect.midX, y: insetRect.minY))
             path.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY))
             path.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY))
             path.close()
-            strokeColor.setStroke()
             path.lineWidth = lineWidth
             path.lineCapStyle = .round
             path.lineJoinStyle = .round

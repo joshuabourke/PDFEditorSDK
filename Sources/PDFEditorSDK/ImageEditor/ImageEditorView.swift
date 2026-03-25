@@ -1763,16 +1763,19 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         if let selectedTextBoxID, let state = textBoxState(id: selectedTextBoxID) {
             removeTextBox(id: selectedTextBoxID)
             viewModel?.didMakeChange(.textBox(add: nil, remove: state))
+            viewModel?.selectedOverlayKind = nil
             return
         }
         if let selectedImageBoxID, let state = imageBoxState(id: selectedImageBoxID) {
             removeImageBox(id: selectedImageBoxID)
             viewModel?.didMakeChange(.imageBox(add: nil, remove: state))
+            viewModel?.selectedOverlayKind = nil
             return
         }
         if let selectedShapeID, let state = shapeBoxState(id: selectedShapeID) {
             removeShapeBox(id: selectedShapeID)
             viewModel?.didMakeChange(.imageShape(add: nil, remove: state))
+            viewModel?.selectedOverlayKind = nil
         }
     }
 
