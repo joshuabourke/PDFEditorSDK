@@ -718,6 +718,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     private let overlayView = UIView()
     private let eraserLayer = CAShapeLayer()
     private let textBoxPreviewLayer = CAShapeLayer()
+    private let imageBorderLayer = CAShapeLayer()
+    private let inkCanvasMask = CALayer()
+    private let overlayViewMask = CALayer()
 
     // MARK: - Properties
     weak var viewModel: ImageEditorViewModel? {
@@ -833,6 +836,19 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         textBoxPreviewLayer.isHidden = true
         layer.addSublayer(textBoxPreviewLayer)
 
+        // 6. Image boundary guide — subtle dashed border showing the editable area
+        imageBorderLayer.fillColor = UIColor.clear.cgColor
+        imageBorderLayer.strokeColor = UIColor.systemBlue.withAlphaComponent(0.25).cgColor
+        imageBorderLayer.lineWidth = 1
+        imageBorderLayer.lineDashPattern = [5, 4]
+        layer.addSublayer(imageBorderLayer)
+
+        // 7. Mask layers — clip ink and overlays to the image content rect
+        inkCanvasMask.backgroundColor = UIColor.black.cgColor
+        inkCanvas.layer.mask = inkCanvasMask
+        overlayViewMask.backgroundColor = UIColor.black.cgColor
+        overlayView.layer.mask = overlayViewMask
+
         setupGestures()
     }
 
@@ -885,8 +901,40 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         imageView.frame = bounds
         inkCanvas.frame = bounds
         overlayView.frame = bounds
+
+        // Keep mask layers and border aligned to the actual image content rect
+        let imgRect = imageContentRect
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        inkCanvasMask.frame = imgRect
+        overlayViewMask.frame = imgRect
+        imageBorderLayer.path = UIBezierPath(rect: imgRect).cgPath
+        imageBorderLayer.frame = bounds
+        CATransaction.commit()
+
         inkCanvas.strokes = strokes
         inkCanvas.setNeedsDisplay()
+    }
+
+    // MARK: - Image Content Rect
+
+    /// The rect (in self's coordinate space) that the source image actually occupies,
+    /// accounting for aspect-fit letterboxing.
+    var imageContentRect: CGRect {
+        guard let image = imageView.image,
+              image.size.width > 0, image.size.height > 0,
+              bounds.width > 0, bounds.height > 0 else {
+            return bounds
+        }
+        let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+        let w = image.size.width * scale
+        let h = image.size.height * scale
+        return CGRect(
+            x: (bounds.width - w) / 2,
+            y: (bounds.height - h) / 2,
+            width: w,
+            height: h
+        )
     }
 
     // MARK: - Source Image
@@ -911,6 +959,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func pencilTouchBegan(_ touch: UITouch, with event: UIEvent?) {
         guard isDrawingMode else { return }
         let point = touch.location(in: self)
+        guard imageContentRect.contains(point) else { return }
         if isEraserMode {
             eraserAffectedStrokes.removeAll()
             showEraserCircle(at: point)
@@ -1195,9 +1244,11 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         let width = targetWidth
         let height = max(120, targetWidth / max(aspect, 0.1))
         let size = CGSize(width: width, height: height)
+        // Centre within the image content area, not the full view
+        let imgRect = imageContentRect
         let origin = CGPoint(
-            x: bounds.midX - size.width / 2,
-            y: bounds.midY - size.height / 2
+            x: imgRect.midX - size.width / 2,
+            y: imgRect.midY - size.height / 2
         )
         let frame = CGRect(origin: origin, size: size)
         let state = OverlayImageState(id: UUID(), frame: frame, imageData: data)
@@ -1322,9 +1373,18 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     // MARK: - Export
 
     func renderToImage() -> UIImage {
-        let renderer = UIGraphicsImageRenderer(size: bounds.size)
-        return renderer.image { _ in
-            drawHierarchy(in: bounds, afterScreenUpdates: true)
+        // Hide all selection handles before capturing
+        deselectAll()
+        endTextEditing()
+
+        let imgRect = imageContentRect
+        guard imgRect.width > 0, imgRect.height > 0 else { return UIImage() }
+
+        // Render only the image content area, cropping out any letterbox space
+        let renderer = UIGraphicsImageRenderer(size: imgRect.size)
+        return renderer.image { ctx in
+            ctx.cgContext.translateBy(x: -imgRect.origin.x, y: -imgRect.origin.y)
+            drawHierarchy(in: bounds, afterScreenUpdates: false)
         }
     }
 
@@ -1333,8 +1393,11 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === textBoxPanGesture {
             guard isTextMode else { return false }
-            let point = gestureRecognizer.location(in: overlayView)
-            if let hitView = overlayView.hitTest(point, with: nil),
+            // Only allow text box creation within the image content area
+            let selfPoint = gestureRecognizer.location(in: self)
+            guard imageContentRect.contains(selfPoint) else { return false }
+            let overlayPoint = gestureRecognizer.location(in: overlayView)
+            if let hitView = overlayView.hitTest(overlayPoint, with: nil),
                hitView !== overlayView {
                 return false
             }
