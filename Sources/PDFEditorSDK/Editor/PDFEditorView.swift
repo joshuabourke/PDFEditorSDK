@@ -2308,7 +2308,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textBoxOverlayView.backgroundColor = .clear
             textBoxOverlayView.frame = docView.bounds
             textBoxOverlayView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            textBoxOverlayView.isUserInteractionEnabled = true
+            textBoxOverlayView.isUserInteractionEnabled = !isFormMode
             docView.addSubview(textBoxOverlayView)
             docView.bringSubviewToFront(textBoxOverlayView)
             // Deselect overlay when the user taps empty canvas space in select mode
