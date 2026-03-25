@@ -2702,6 +2702,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         for pageIndex in 0..<document.pageCount {
             guard let page = document.page(at: pageIndex) else { continue }
             for annotation in page.annotations {
+                guard annotation.type != "Ink" else { continue }
                 let isWidgetSubtype = annotation.type == widgetSubtype
                 let hasFieldName = annotation.fieldName != nil
                 let hasWidgetFieldKind = !annotation.widgetFieldType.rawValue.isEmpty
