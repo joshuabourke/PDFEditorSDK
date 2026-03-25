@@ -2175,8 +2175,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
 
     private func disableTextSelection() {
-        // Remove PDFView's built-in gesture recognizers that handle text selection
+        // Only touch PDFKit's built-in gesture recognisers — skip the ones we own
+        // and manage explicitly through mode properties (inkSelectTapGesture, etc.).
         gestureRecognizers?.forEach { gesture in
+            guard gesture !== inkSelectTapGesture else { return }
             if let longPress = gesture as? UILongPressGestureRecognizer {
                 longPress.isEnabled = false
             }
@@ -2184,13 +2186,16 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 tap.isEnabled = false
             }
         }
-        
+
         // Also disable on the scroll view's subviews where text selection happens
         disableSelectionGestures(in: self)
     }
 
     private func enableTextSelection() {
+        // Only touch PDFKit's built-in gesture recognisers — skip the ones we own
+        // and manage explicitly through mode properties (inkSelectTapGesture, etc.).
         gestureRecognizers?.forEach { gesture in
+            guard gesture !== inkSelectTapGesture else { return }
             if let longPress = gesture as? UILongPressGestureRecognizer {
                 longPress.isEnabled = true
             }
@@ -2198,7 +2203,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 tap.isEnabled = true
             }
         }
-        
+
         enableSelectionGestures(in: self)
     }
 
@@ -2322,6 +2327,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             }
         } else if let docView = documentView {
             docView.bringSubviewToFront(textBoxOverlayView)
+            // Re-sync on every layout pass in case PDFKit rebuilds its internal hierarchy.
+            textBoxOverlayView.isUserInteractionEnabled = !isFormMode
             if inkSelectionOverlayView.superview != nil {
                 docView.bringSubviewToFront(inkSelectionOverlayView)
             }
