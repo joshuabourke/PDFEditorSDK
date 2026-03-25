@@ -2140,6 +2140,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             inkSelectTapGesture?.isEnabled = isSelectMode
+            overlaySelectTapGesture?.isEnabled = isSelectMode
             if !isSelectMode {
                 deselectInkAnnotation()
                 deselectOverlaySelection()
@@ -2280,6 +2281,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private let inkSelectionOverlayView = UIView()
     private let inkSelectionBorderLayer = CAShapeLayer()
     private var inkSelectTapGesture: UITapGestureRecognizer?
+    private var overlaySelectTapGesture: UITapGestureRecognizer?
     
     private let overlayMetadataPrefix = "OVERLAY_META_V1:"
     private let overlayMetadataPartPrefix = "OVERLAY_META_V1_PART:"
@@ -2309,6 +2311,12 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textBoxOverlayView.isUserInteractionEnabled = true
             docView.addSubview(textBoxOverlayView)
             docView.bringSubviewToFront(textBoxOverlayView)
+            // Deselect overlay when the user taps empty canvas space in select mode
+            let overlayTap = UITapGestureRecognizer(target: self, action: #selector(handleOverlaySelectTap(_:)))
+            overlayTap.cancelsTouchesInView = false
+            overlayTap.isEnabled = false
+            textBoxOverlayView.addGestureRecognizer(overlayTap)
+            overlaySelectTapGesture = overlayTap
             if inkSelectionOverlayView.superview != nil {
                 docView.bringSubviewToFront(inkSelectionOverlayView)
             }
@@ -2485,7 +2493,18 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             deselectOverlaySelection()
         }
     }
-    
+
+    @objc private func handleOverlaySelectTap(_ gesture: UITapGestureRecognizer) {
+        guard isSelectMode else { return }
+        let point = gesture.location(in: textBoxOverlayView)
+        let hitView = textBoxOverlayView.hitTest(point, with: nil)
+        // Only deselect when the tap lands on empty canvas (not on any overlay box)
+        if hitView === textBoxOverlayView {
+            deselectInkAnnotation()
+            deselectOverlaySelection()
+        }
+    }
+
     private func updateInkSelectionOverlay() {
         guard let annotation = selectedInkAnnotation,
               let page = selectedInkPage else {

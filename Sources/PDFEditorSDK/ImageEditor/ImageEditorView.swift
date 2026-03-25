@@ -1030,6 +1030,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             textBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+            selectTapGesture?.isEnabled = isSelectMode
             if !isSelectMode {
                 deselectAll()
             }
@@ -1075,6 +1076,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     private var fingerPinchGesture: UIPinchGestureRecognizer?
     private var textBoxPanGesture: UIPanGestureRecognizer?
     private var textBoxStartPoint: CGPoint?
+    private var selectTapGesture: UITapGestureRecognizer?
     private var eraserLocation: CGPoint?
 
     // MARK: - Init
@@ -1143,6 +1145,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         setupGestures()
         setupShapePreviewLayer()
         setupShapePanGesture()
+        setupSelectTapGesture()
     }
 
     private func setupShapePreviewLayer() {
@@ -1165,6 +1168,14 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         pan.isEnabled = false
         addGestureRecognizer(pan)
         shapePanGesture = pan
+    }
+
+    private func setupSelectTapGesture() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelectTap(_:)))
+        tap.cancelsTouchesInView = false
+        tap.isEnabled = false
+        overlayView.addGestureRecognizer(tap)
+        selectTapGesture = tap
     }
 
     private func setupGestures() {
@@ -1748,6 +1759,16 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         updateSelectionUI()
         if let box = imageBoxViews[id] {
             overlayView.bringSubviewToFront(box)
+        }
+    }
+
+    @objc private func handleSelectTap(_ gesture: UITapGestureRecognizer) {
+        guard isSelectMode else { return }
+        let point = gesture.location(in: overlayView)
+        let hitView = overlayView.hitTest(point, with: nil)
+        // Only deselect when the tap lands on empty canvas (not on any overlay box)
+        if hitView === overlayView {
+            deselectAll()
         }
     }
 
