@@ -64,10 +64,57 @@ struct PDFFormEditorView: View {
     @State private var insertPageIndex = 0
     
     var body: some View {
+        coreEditorView
+            .sheet(isPresented: $isShowingImagePicker) {
+                ImagePicker(sourceType: imagePickerSource.uiSourceType, allowsEditing: true) { image in
+                    viewModel.handleImagePickedFromSheet(image)
+                }
+            }
+            .sheet(isPresented: $isShowingShareSheet) {
+                if let exportURL {
+                    ActivityView(activityItems: [exportURL])
+                }
+            }
+            .sheet(isPresented: $isShowingInsertPageSheet) {
+                NavigationStack {
+                    Form {
+                        Picker("Insert Position", selection: $insertPageIndex) {
+                            ForEach(0...max(viewModel.pageCount, 0), id: \.self) { index in
+                                Text(insertPageLabel(for: index))
+                                    .tag(index)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                    }
+                    .navigationTitle("Insert Page")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { isShowingInsertPageSheet = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Insert") {
+                                viewModel.addBlankPage(at: insertPageIndex)
+                                isShowingInsertPageSheet = false
+                            }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
+            .onChange(of: viewModel.textBoxFontSize) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.textBoxIsBold) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.textBoxTextColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
+            .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
+    }
+
+    private var coreEditorView: some View {
         VStack {
             // Toolbar
             toolbarView
-            
+
             // PDF View
             if viewModel.pdfDocument != nil {
                 ZStack {
@@ -94,56 +141,56 @@ struct PDFFormEditorView: View {
         .navigationTitle("PDF Form Editor")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-                if showsDismissButton {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button {
-                            dismiss()
-                        } label: {
-                            Label("Documents", systemImage: "doc.text")
-                        }
-                    }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
+            if showsDismissButton {
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        viewModel.undo()
+                        dismiss()
                     } label: {
-                        Image(systemName: "arrow.uturn.backward")
-                    }
-                    .disabled(!viewModel.canUndo)
-                    
-                    Button {
-                        viewModel.redo()
-                    } label: {
-                        Image(systemName: "arrow.uturn.forward")
-                    }
-                    .disabled(!viewModel.canRedo)
-                    
-                    Button {
-                        isShowingImporter = true
-                    } label: {
-                        Image(systemName: "folder")
-                    }
-                    
-                    Button {
-                        viewModel.savePDF()
-                        isShowingSaveAlert = true
-                        onSaveNavigate?()
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
-                    }
-                    
-                    Button {
-                        exportURL = viewModel.exportFlattenedPDF()
-                        if exportURL != nil {
-                            isShowingShareSheet = true
-                        } else {
-                            isShowingExportAlert = true
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Documents", systemImage: "doc.text")
                     }
                 }
             }
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    viewModel.undo()
+                } label: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+                .disabled(!viewModel.canUndo)
+
+                Button {
+                    viewModel.redo()
+                } label: {
+                    Image(systemName: "arrow.uturn.forward")
+                }
+                .disabled(!viewModel.canRedo)
+
+                Button {
+                    isShowingImporter = true
+                } label: {
+                    Image(systemName: "folder")
+                }
+
+                Button {
+                    viewModel.savePDF()
+                    isShowingSaveAlert = true
+                    onSaveNavigate?()
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+
+                Button {
+                    exportURL = viewModel.exportFlattenedPDF()
+                    if exportURL != nil {
+                        isShowingShareSheet = true
+                    } else {
+                        isShowingExportAlert = true
+                    }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+        }
         .fileImporter(
             isPresented: $isShowingImporter,
             allowedContentTypes: [.pdf],
@@ -194,57 +241,6 @@ struct PDFFormEditorView: View {
             }
         } message: {
             Text("Choose a source for this field.")
-        }
-        .sheet(isPresented: $isShowingImagePicker) {
-            ImagePicker(sourceType: imagePickerSource.uiSourceType, allowsEditing: true) { image in
-                viewModel.handleImagePickedFromSheet(image)
-            }
-        }
-        .sheet(isPresented: $isShowingShareSheet) {
-            if let exportURL {
-                ActivityView(activityItems: [exportURL])
-            }
-        }
-        .sheet(isPresented: $isShowingInsertPageSheet) {
-            NavigationStack {
-                Form {
-                    Picker("Insert Position", selection: $insertPageIndex) {
-                        ForEach(0...max(viewModel.pageCount, 0), id: \.self) { index in
-                            Text(insertPageLabel(for: index))
-                                .tag(index)
-                        }
-                    }
-                    .pickerStyle(.wheel)
-                }
-                .navigationTitle("Insert Page")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
-                            isShowingInsertPageSheet = false
-                        }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Insert") {
-                            viewModel.addBlankPage(at: insertPageIndex)
-                            isShowingInsertPageSheet = false
-                        }
-                    }
-                }
-            }
-            .presentationDetents([.medium])
-        }
-        .onChange(of: viewModel.textBoxFontSize) { _, _ in
-            viewModel.applyTextStyleToSelectedTextBox()
-        }
-        .onChange(of: viewModel.textBoxIsBold) { _, _ in
-            viewModel.applyTextStyleToSelectedTextBox()
-        }
-        .onChange(of: viewModel.textBoxTextColor) { _, _ in
-            viewModel.applyTextStyleToSelectedTextBox()
-        }
-        .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in
-            viewModel.applyTextStyleToSelectedTextBox()
         }
     }
     
@@ -513,54 +509,21 @@ struct PDFFormEditorView: View {
                         .fill(Color.secondary.opacity(0.25))
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
-                    
-                    VStack(spacing: 6) {
-                        Text("Select")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        HStack {
-                            Button {
-                                viewModel.setTool(.select)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "cursorarrow.rays")
-                                        .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Select")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-                            
-                            if viewModel.hasSelectedInkAnnotation || viewModel.hasSelectedOverlayObject {
-                                Button {
-                                    viewModel.deleteSelectedSelection()
-                                } label: {
-                                    VStack(spacing: 4) {
-                                        Image(systemName: "trash")
-                                            .fontWeight(.semibold)
-                                        Text("Delete")
-                                            .fontWeight(.semibold)
-                                    }
-                                    .foregroundStyle(.red)
-                                    .padding(6)
-                                    .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                    
+
+                    shapeToolSection
+
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
-                    
+
+                    selectToolSection
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.25))
+                        .frame(width: 1, height: 36)
+                        .padding(.top, 14)
+
                     VStack(spacing: 6) {
                         Text("Image")
                             .font(.caption2)
@@ -592,7 +555,7 @@ struct PDFFormEditorView: View {
                             }
                         }
                     }
-                    
+
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
                         .frame(width: 1, height: 36)
@@ -644,6 +607,205 @@ struct PDFFormEditorView: View {
         .contentBackgroundModifier()
     }
     
+    @ViewBuilder
+    private var shapeToolSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Shape")
+                .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                Button { viewModel.setTool(.shape) } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "square.on.circle")
+                            .symbolVariant(viewModel.activeTool == .shape ? .fill : .none)
+                            .fontWeight(.semibold)
+                        Text("Shape").fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(6)
+                    .background(viewModel.activeTool == .shape ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.isShapeMode {
+                    shapeSubtoolsRow
+                }
+            }
+            .animation(.linear(duration: 0.2), value: viewModel.isShapeMode)
+        }
+    }
+
+    @ViewBuilder
+    private var shapeSubtoolsRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
+                Button { viewModel.activeShapeKind = kind } label: {
+                    toolbarChip {
+                        Image(systemName: iconName(for: kind)).fontWeight(.semibold)
+                        Text(labelText(for: kind)).fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(4)
+                    .background(toolbarChipBackground(isActive: viewModel.activeShapeKind == kind))
+                }
+                .buttonStyle(.plain)
+            }
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            Menu {
+                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "lineweight").fontWeight(.semibold)
+                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(4)
+                .background(toolbarChipBackground())
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var selectToolSection: some View {
+        VStack(spacing: 6) {
+            Text("Select")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    viewModel.setTool(.select)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "cursorarrow.rays")
+                            .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
+                            .fontWeight(.semibold)
+                        Text("Select")
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(6)
+                    .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .textBox {
+                    selectTextBoxSubtools
+                }
+
+                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .shape {
+                    selectShapeSubtools
+                }
+
+                if viewModel.hasSelectedInkAnnotation || viewModel.hasSelectedOverlayObject {
+                    Button {
+                        viewModel.deleteSelectedSelection()
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "trash")
+                                .fontWeight(.semibold)
+                            Text("Delete")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(.red)
+                        .padding(6)
+                        .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .animation(.linear(duration: 0.2), value: viewModel.selectedOverlayKind)
+        }
+    }
+
+    @ViewBuilder
+    private var selectTextBoxSubtools: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Menu {
+                Button("Black") { viewModel.textBoxTextColor = .label }
+                Button("White") { viewModel.textBoxTextColor = .white }
+                Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
+                Button("Red") { viewModel.textBoxTextColor = .systemRed }
+                Button("Green") { viewModel.textBoxTextColor = .systemGreen }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "square.fill")
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxTextColor))
+                    Text("Text").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
+                Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
+                Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
+                Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
+                Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "square.fill")
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                    Text("BG").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
+                Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
+                Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
+                Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "textformat.size").font(.title3).fontWeight(.semibold)
+                    Text("\(Int(viewModel.textBoxFontSize))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Button { viewModel.textBoxIsBold.toggle() } label: {
+                toolbarChip {
+                    Image(systemName: "bold").font(.title3).fontWeight(.semibold)
+                    Text("Bold").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private var selectShapeSubtools: some View {
+        HStack(alignment: .center, spacing: 8) {
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            Menu {
+                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "lineweight").fontWeight(.semibold)
+                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+        }
+    }
+
     private func toolbarChip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 4) {
             content()
@@ -675,6 +837,22 @@ struct PDFFormEditorView: View {
             return "After Page \(viewModel.pageCount)"
         }
         return "Before Page \(pageNumber)"
+    }
+
+    private func iconName(for kind: OverlayShapeKind) -> String {
+        switch kind {
+        case .circle: return "circle"
+        case .rectangle: return "rectangle"
+        case .triangle: return "triangle"
+        }
+    }
+
+    private func labelText(for kind: OverlayShapeKind) -> String {
+        switch kind {
+        case .circle: return "Circle"
+        case .rectangle: return "Rect"
+        case .triangle: return "Tri"
+        }
     }
 }
 
@@ -797,9 +975,15 @@ class PDFFormViewModel {
         }
     }
     
+    var activeShapeKind: OverlayShapeKind = .rectangle
+    var shapeStrokeColor: UIColor = .systemRed
+    var shapeLineWidth: CGFloat = 2.0
+    var selectedOverlayKind: SelectedOverlayKind?
+
     var isDrawingMode: Bool { activeTool == .draw }
     var isTextMode: Bool { activeTool == .text }
     var isSelectMode: Bool { activeTool == .select }
+    var isShapeMode: Bool { activeTool == .shape }
     
     @discardableResult
     func loadPDF() -> Bool {
@@ -837,6 +1021,12 @@ class PDFFormViewModel {
     }
     
     func setTool(_ tool: EditorTool) {
+        if tool == .shape {
+            activeTool = .shape
+            pdfView?.endOverlayTextEditing()
+            isEraserMode = false
+            return
+        }
         if activeTool == tool, tool != .select {
             activeTool = .select
             pdfView?.endOverlayTextEditing()
@@ -854,6 +1044,10 @@ class PDFFormViewModel {
             hasSelectedInkAnnotation = false
             pdfView?.deselectInkAnnotation()
         }
+    }
+
+    func applyShapeStyleToSelected() {
+        pdfView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
     }
     
     func toggleScrollLock() {
@@ -998,6 +1192,11 @@ class PDFFormViewModel {
                 return .overlayImage(add: current, remove: remove)
             }
             return action
+        case .overlayShape(let add, let remove):
+            if let add, let current = pdfView?.overlayShapeState(id: add.id) {
+                return .overlayShape(add: current, remove: remove)
+            }
+            return action
         default:
             return action
         }
@@ -1040,6 +1239,11 @@ class PDFFormViewModel {
                 pdfView?.updateOverlayImage(from: before)
             case .deleteInkAnnotation(let ann, let page):
                 page.addAnnotation(ann)
+            case .overlayShape(let add, let remove):
+                if let add { pdfView?.removeOverlayShape(id: add.id) }
+                if let remove { pdfView?.addOverlayShape(from: remove) }
+            case .overlayShapeUpdate(let before, _):
+                pdfView?.updateOverlayShape(from: before)
             }
         }
     
@@ -1080,6 +1284,11 @@ class PDFFormViewModel {
                 if pdfView?.selectedInkAnnotation === ann {
                     pdfView?.deselectInkAnnotation()
                 }
+            case .overlayShape(let add, let remove):
+                if let add { pdfView?.addOverlayShape(from: add) }
+                if let remove { pdfView?.removeOverlayShape(id: remove.id) }
+            case .overlayShapeUpdate(_, let after):
+                pdfView?.updateOverlayShape(from: after)
             }
         }
     
@@ -1258,7 +1467,33 @@ class PDFFormViewModel {
                             cg.restoreGState()
                         }
                     }
-                    
+
+                    let shapeItems = metadata.shapes.filter { $0.pageIndex == pageIndex }
+                    for item in shapeItems {
+                        guard let kind = OverlayShapeKind(rawValue: item.kindRaw) else { continue }
+                        let rect = item.rect.cgRect
+                        let insetRect = rect.insetBy(dx: item.lineWidth / 2, dy: item.lineWidth / 2)
+                        cg.saveGState()
+                        cg.setStrokeColor(item.strokeColor.uiColor.cgColor)
+                        cg.setLineWidth(item.lineWidth)
+                        cg.setLineCap(.round)
+                        cg.setLineJoin(.round)
+                        switch kind {
+                        case .circle:
+                            cg.addEllipse(in: insetRect)
+                        case .rectangle:
+                            let path = UIBezierPath(roundedRect: insetRect, cornerRadius: 4)
+                            cg.addPath(path.cgPath)
+                        case .triangle:
+                            cg.move(to: CGPoint(x: insetRect.midX, y: insetRect.minY))
+                            cg.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY))
+                            cg.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY))
+                            cg.closePath()
+                        }
+                        cg.strokePath()
+                        cg.restoreGState()
+                    }
+
                     cg.restoreGState()
                 }
             }
@@ -1426,6 +1661,8 @@ enum UndoAction {
     case overlayImage(add: OverlayImageState?, remove: OverlayImageState?)
     case overlayImageUpdate(before: OverlayImageState, after: OverlayImageState)
     case deleteInkAnnotation(annotation: PDFAnnotation, page: PDFPage)
+    case overlayShape(add: OverlayShapeState?, remove: OverlayShapeState?)
+    case overlayShapeUpdate(before: OverlayShapeState, after: OverlayShapeState)
 }
 
 enum EditorTool {
@@ -1433,6 +1670,17 @@ enum EditorTool {
     case form
     case draw
     case text
+    case shape
+}
+
+enum OverlayShapeKind: String, Codable {
+    case circle
+    case rectangle
+    case triangle
+}
+
+enum SelectedOverlayKind {
+    case textBox, image, shape
 }
 
 struct OverlayTextBoxState: Identifiable {
@@ -1451,9 +1699,32 @@ struct OverlayImageState: Identifiable {
     var imageData: Data
 }
 
+struct OverlayShapeState: Identifiable {
+    let id: UUID
+    var frame: CGRect
+    var kind: OverlayShapeKind
+    var strokeColor: UIColor
+    var lineWidth: CGFloat
+}
+
 struct OverlayDocumentMetadata: Codable {
     var textBoxes: [OverlayTextBoxMeta]
     var images: [OverlayImageMeta]
+    var shapes: [OverlayShapeMeta]
+
+    init(textBoxes: [OverlayTextBoxMeta] = [], images: [OverlayImageMeta] = [], shapes: [OverlayShapeMeta] = []) {
+        self.textBoxes = textBoxes
+        self.images = images
+        self.shapes = shapes
+    }
+
+    // Backward-compat decode: shapes defaults to [] if absent
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        textBoxes = try container.decodeIfPresent([OverlayTextBoxMeta].self, forKey: .textBoxes) ?? []
+        images = try container.decodeIfPresent([OverlayImageMeta].self, forKey: .images) ?? []
+        shapes = try container.decodeIfPresent([OverlayShapeMeta].self, forKey: .shapes) ?? []
+    }
 }
 
 struct OverlayTextBoxMeta: Codable {
@@ -1472,6 +1743,15 @@ struct OverlayImageMeta: Codable {
     var pageIndex: Int
     var rect: RectCodable
     var imageBase64: String
+}
+
+struct OverlayShapeMeta: Codable {
+    var id: UUID
+    var pageIndex: Int
+    var rect: RectCodable
+    var kindRaw: String
+    var strokeColor: RGBAColor
+    var lineWidth: CGFloat
 }
 
 struct RectCodable: Codable {
@@ -1559,6 +1839,10 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.textBoxFontSize = viewModel.textBoxFontSize
         pdfView.textBoxIsBold = viewModel.textBoxIsBold
         pdfView.textBoxTextColor = viewModel.textBoxTextColor
+        pdfView.isShapeMode = viewModel.activeTool == .shape
+        pdfView.currentShapeKind = viewModel.activeShapeKind
+        pdfView.shapeStrokeColor = viewModel.shapeStrokeColor
+        pdfView.shapeLineWidth = viewModel.shapeLineWidth
         pdfView.setFormFieldEntryEnabled(viewModel.activeTool == .form)
         pdfView.isUserInteractionEnabled = !viewModel.pageScrollLocked
     }
@@ -1854,6 +2138,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             guard oldValue != isSelectMode else { return }
             textBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+            shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             inkSelectTapGesture?.isEnabled = isSelectMode
             if !isSelectMode {
                 deselectInkAnnotation()
@@ -1969,8 +2254,22 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private let formFieldHighlightLayer = CAShapeLayer()
     private var textBoxViews: [UUID: TextBoxView] = [:]
     private var imageBoxViews: [UUID: ImageBoxView] = [:]
+    private var shapeBoxViews: [UUID: ShapeBoxView] = [:]
     private var selectedTextBoxID: UUID?
     private var selectedImageBoxID: UUID?
+    private var selectedShapeID: UUID?
+    private var shapePanGesture: UIPanGestureRecognizer?
+    private var shapeStartPoint: CGPoint?
+    private let shapePreviewLayer = CAShapeLayer()
+    var currentShapeKind: OverlayShapeKind = .rectangle
+    var shapeStrokeColor: UIColor = .systemRed
+    var shapeLineWidth: CGFloat = 2.0
+    var isShapeMode = false {
+        didSet {
+            shapePanGesture?.isEnabled = isShapeMode
+            if !isShapeMode { shapePreviewLayer.isHidden = true }
+        }
+    }
     private var movingInkAnnotation: PDFAnnotation?
     private var movingInkStartBounds: CGRect?
     private var movingInkOffset: CGPoint?
@@ -2072,6 +2371,30 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         setupPencilDrawingGesture()
         setupFingerNavigationGestures()
         setupInkSelectTapGesture()
+        setupShapePreviewLayer()
+        setupShapePanGesture()
+    }
+
+    private func setupShapePreviewLayer() {
+        shapePreviewLayer.strokeColor = UIColor.systemOrange.withAlphaComponent(0.9).cgColor
+        shapePreviewLayer.fillColor = UIColor.clear.cgColor
+        shapePreviewLayer.lineWidth = 1.5
+        shapePreviewLayer.lineDashPattern = [6, 4]
+        shapePreviewLayer.isHidden = true
+        layer.addSublayer(shapePreviewLayer)
+    }
+
+    private func setupShapePanGesture() {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleShapePan(_:)))
+        pan.cancelsTouchesInView = true
+        pan.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
+        pan.delegate = self
+        pan.isEnabled = false
+        addGestureRecognizer(pan)
+        shapePanGesture = pan
     }
     
     private func setupPencilDrawingGesture() {
@@ -2647,7 +2970,129 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         let rect = rectFrom(start, to: end)
         textBoxLayer.path = UIBezierPath(rect: rect).cgPath
     }
-    
+
+    // MARK: - Shape Pan Gesture
+
+    @objc private func handleShapePan(_ gesture: UIPanGestureRecognizer) {
+        guard isShapeMode else { return }
+        let viewPoint = gesture.location(in: self)
+        switch gesture.state {
+        case .began:
+            shapeStartPoint = viewPoint
+            shapePreviewLayer.isHidden = false
+            updateShapePreview(from: viewPoint, to: viewPoint)
+        case .changed:
+            guard let start = shapeStartPoint else { return }
+            updateShapePreview(from: start, to: viewPoint)
+        case .ended, .cancelled:
+            guard let start = shapeStartPoint else { return }
+            shapePreviewLayer.isHidden = true
+            shapeStartPoint = nil
+            let rectInView = rectFrom(start, to: viewPoint).insetBy(dx: -2, dy: -2)
+            if rectInView.width >= 20, rectInView.height >= 20 {
+                createOverlayShape(with: rectInView)
+            }
+        default:
+            break
+        }
+    }
+
+    private func updateShapePreview(from start: CGPoint, to end: CGPoint) {
+        let rect = rectFrom(start, to: end)
+        switch currentShapeKind {
+        case .circle:
+            shapePreviewLayer.path = UIBezierPath(ovalIn: rect).cgPath
+        case .rectangle:
+            shapePreviewLayer.path = UIBezierPath(roundedRect: rect, cornerRadius: 4).cgPath
+        case .triangle:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.close()
+            shapePreviewLayer.path = path.cgPath
+        }
+    }
+
+    private func createOverlayShape(with rectInView: CGRect) {
+        guard let docView = documentView else { return }
+        let rectInDoc = convert(rectInView, to: docView)
+        let normalised = CGRect(
+            origin: rectInDoc.origin,
+            size: CGSize(width: max(rectInDoc.width, 30), height: max(rectInDoc.height, 30))
+        )
+        let state = OverlayShapeState(
+            id: UUID(),
+            frame: normalised,
+            kind: currentShapeKind,
+            strokeColor: shapeStrokeColor,
+            lineWidth: shapeLineWidth
+        )
+        addOverlayShape(from: state)
+        formViewModel?.didMakeChange(.overlayShape(add: state, remove: nil))
+    }
+
+    // MARK: - Shape Overlay Management
+
+    func addOverlayShape(from state: OverlayShapeState) {
+        let box = ShapeBoxView(id: state.id, kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.frame = state.frame
+        box.setSelectMode(isSelectMode)
+        box.onSelect = { [weak self] id in self?.selectShapeBox(id: id) }
+        box.onEndChange = { [weak self] before, after in
+            guard before.frame != after.frame else { return }
+            self?.formViewModel?.didMakeChange(.overlayShapeUpdate(before: before, after: after))
+        }
+        textBoxOverlayView.addSubview(box)
+        shapeBoxViews[state.id] = box
+    }
+
+    func removeOverlayShape(id: UUID) {
+        shapeBoxViews[id]?.removeFromSuperview()
+        shapeBoxViews[id] = nil
+        if selectedShapeID == id {
+            selectedShapeID = nil
+            syncOverlaySelectionState()
+        }
+    }
+
+    func overlayShapeState(id: UUID) -> OverlayShapeState? {
+        guard let box = shapeBoxViews[id] else { return nil }
+        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+    }
+
+    func updateOverlayShape(from state: OverlayShapeState) {
+        guard let box = shapeBoxViews[state.id] else { return }
+        box.frame = state.frame
+        box.applyStyle(strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+    }
+
+    func applyShapeStyleToSelected(strokeColor: UIColor, lineWidth: CGFloat) {
+        guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
+        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        box.applyStyle(strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+        if before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
+            formViewModel?.didMakeChange(.overlayShapeUpdate(before: before, after: after))
+        }
+    }
+
+    private func selectShapeBox(id: UUID) {
+        selectedShapeID = id
+        selectedTextBoxID = nil
+        selectedImageBoxID = nil
+        deselectInkAnnotation()
+        formViewModel?.selectedOverlayKind = .shape
+        if let box = shapeBoxViews[id] {
+            formViewModel?.shapeStrokeColor = box.strokeColor
+            formViewModel?.shapeLineWidth = box.lineWidth
+        }
+        updateOverlaySelectionUI()
+        if let box = shapeBoxViews[id] {
+            textBoxOverlayView.bringSubviewToFront(box)
+        }
+    }
+
     private func rectFrom(_ start: CGPoint, to end: CGPoint) -> CGRect {
         let origin = CGPoint(x: min(start.x, end.x), y: min(start.y, end.y))
         let size = CGSize(width: abs(end.x - start.x), height: abs(end.y - start.y))
@@ -2810,6 +3255,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if let selectedImageBoxID, let state = overlayImageState(id: selectedImageBoxID) {
             removeOverlayImage(id: selectedImageBoxID)
             formViewModel?.didMakeChange(.overlayImage(add: nil, remove: state))
+            return
+        }
+        if let selectedShapeID, let state = overlayShapeState(id: selectedShapeID) {
+            removeOverlayShape(id: selectedShapeID)
+            formViewModel?.didMakeChange(.overlayShape(add: nil, remove: state))
         }
     }
 
@@ -2821,7 +3271,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private func selectTextBox(id: UUID) {
         selectedTextBoxID = id
         selectedImageBoxID = nil
+        selectedShapeID = nil
         deselectInkAnnotation()
+        formViewModel?.selectedOverlayKind = .textBox
         updateOverlaySelectionUI()
         if let box = textBoxViews[id] {
             textBoxOverlayView.bringSubviewToFront(box)
@@ -2831,7 +3283,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private func selectImageBox(id: UUID) {
         selectedImageBoxID = id
         selectedTextBoxID = nil
+        selectedShapeID = nil
         deselectInkAnnotation()
+        formViewModel?.selectedOverlayKind = .image
         updateOverlaySelectionUI()
         if let box = imageBoxViews[id] {
             textBoxOverlayView.bringSubviewToFront(box)
@@ -2845,16 +3299,21 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         for (id, box) in imageBoxViews {
             box.setSelected(id == selectedImageBoxID)
         }
+        for (id, box) in shapeBoxViews {
+            box.setSelected(id == selectedShapeID)
+        }
         syncOverlaySelectionState()
     }
 
     private func syncOverlaySelectionState() {
-        formViewModel?.hasSelectedOverlayObject = (selectedTextBoxID != nil || selectedImageBoxID != nil)
+        formViewModel?.hasSelectedOverlayObject = (selectedTextBoxID != nil || selectedImageBoxID != nil || selectedShapeID != nil)
     }
 
     func deselectOverlaySelection() {
         selectedTextBoxID = nil
         selectedImageBoxID = nil
+        selectedShapeID = nil
+        formViewModel?.selectedOverlayKind = nil
         updateOverlaySelectionUI()
     }
 
@@ -2862,7 +3321,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         guard let document else { return }
         
         let metadata = overlayMetadataSnapshot()
-        let isEmpty = metadata.textBoxes.isEmpty && metadata.images.isEmpty
+        let isEmpty = metadata.textBoxes.isEmpty && metadata.images.isEmpty && metadata.shapes.isEmpty
         
         for pageIndex in 0..<document.pageCount {
             guard let page = document.page(at: pageIndex) else { continue }
@@ -2951,7 +3410,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     func overlayMetadataSnapshot() -> OverlayDocumentMetadata {
         var textMetas: [OverlayTextBoxMeta] = []
         var imageMetas: [OverlayImageMeta] = []
-        
+        var shapeMetas: [OverlayShapeMeta] = []
+
         for (id, box) in textBoxViews {
             guard let pageInfo = pageRect(fromDocRect: box.frame) else { continue }
             let meta = OverlayTextBoxMeta(
@@ -2966,7 +3426,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             )
             textMetas.append(meta)
         }
-        
+
         for (id, box) in imageBoxViews {
             guard let pageInfo = pageRect(fromDocRect: box.frame) else { continue }
             let meta = OverlayImageMeta(
@@ -2977,8 +3437,21 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             )
             imageMetas.append(meta)
         }
-        
-        return OverlayDocumentMetadata(textBoxes: textMetas, images: imageMetas)
+
+        for (id, box) in shapeBoxViews {
+            guard let pageInfo = pageRect(fromDocRect: box.frame) else { continue }
+            let meta = OverlayShapeMeta(
+                id: id,
+                pageIndex: pageInfo.pageIndex,
+                rect: RectCodable(pageInfo.pageRect),
+                kindRaw: box.shapeKind.rawValue,
+                strokeColor: RGBAColor(box.strokeColor),
+                lineWidth: box.lineWidth
+            )
+            shapeMetas.append(meta)
+        }
+
+        return OverlayDocumentMetadata(textBoxes: textMetas, images: imageMetas, shapes: shapeMetas)
     }
     
     private func importOverlayMetadata(_ metadata: OverlayDocumentMetadata) {
@@ -3008,6 +3481,20 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             )
             addOverlayImage(from: state)
         }
+
+        for shape in metadata.shapes {
+            guard let page = document?.page(at: shape.pageIndex),
+                  let kind = OverlayShapeKind(rawValue: shape.kindRaw) else { continue }
+            let docRect = docRect(fromPageRect: shape.rect.cgRect, on: page)
+            let state = OverlayShapeState(
+                id: shape.id,
+                frame: docRect,
+                kind: kind,
+                strokeColor: shape.strokeColor.uiColor,
+                lineWidth: shape.lineWidth
+            )
+            addOverlayShape(from: state)
+        }
     }
     
     private func clearOverlayViews() {
@@ -3019,6 +3506,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             view.removeFromSuperview()
         }
         imageBoxViews.removeAll()
+        for view in shapeBoxViews.values {
+            view.removeFromSuperview()
+        }
+        shapeBoxViews.removeAll()
     }
     
     private func pageRect(fromDocRect rectInDoc: CGRect) -> (pageIndex: Int, pageRect: CGRect)? {
@@ -3553,6 +4044,14 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 return false
             }
         }
+        if gestureRecognizer === shapePanGesture {
+            guard isShapeMode else { return false }
+            let point = gestureRecognizer.location(in: textBoxOverlayView)
+            if let hitView = textBoxOverlayView.hitTest(point, with: nil),
+               hitView !== textBoxOverlayView {
+                return false
+            }
+        }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
 }
@@ -4066,6 +4565,341 @@ final class ImageBoxView: UIView {
         case .ended, .cancelled:
             let before = OverlayImageState(id: id, frame: startFrame, imageData: imageData)
             let after = OverlayImageState(id: id, frame: frame, imageData: imageData)
+            if before.frame != after.frame {
+                onEndChange?(before, after)
+            }
+        default:
+            break
+        }
+    }
+}
+
+// MARK: - ShapeBoxView
+
+final class ShapeBoxView: UIView {
+    let id: UUID
+    private(set) var shapeKind: OverlayShapeKind
+    private(set) var strokeColor: UIColor
+    private(set) var lineWidth: CGFloat
+
+    var onSelect: ((UUID) -> Void)?
+    var onEndChange: ((OverlayShapeState, OverlayShapeState) -> Void)?
+
+    private var isSelectMode: Bool = false
+    private var isSelected: Bool = false
+
+    private let selectionBorderLayer = CAShapeLayer()
+    private let moveHandle = UIView()
+    private let moveIcon = UIImageView()
+    private let resizeHitTarget = ResizeHandleHitTargetView()
+    private let resizeHandleVisual = UIView()
+    private let resizeIcon = UIImageView()
+    private var pinchGesture: UIPinchGestureRecognizer?
+    private let resizeFeedback = UIImpactFeedbackGenerator(style: .light)
+    private let minSize = CGSize(width: 30, height: 30)
+    private let resizeVisualSize: CGFloat = 22
+    private var pinchStartFrame: CGRect = .zero
+    private var startFrame: CGRect = .zero
+
+    init(id: UUID, kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
+        self.id = id
+        self.shapeKind = kind
+        self.strokeColor = strokeColor
+        self.lineWidth = lineWidth
+        super.init(frame: .zero)
+        setup()
+    }
+
+    required init?(coder: NSCoder) {
+        self.id = UUID()
+        self.shapeKind = .rectangle
+        self.strokeColor = .systemRed
+        self.lineWidth = 2.0
+        super.init(coder: coder)
+        setup()
+    }
+
+    private func setup() {
+        isOpaque = false
+        backgroundColor = .clear
+        clipsToBounds = false
+
+        // Selection border layer (blue dashed outline)
+        selectionBorderLayer.fillColor = UIColor.clear.cgColor
+        selectionBorderLayer.strokeColor = UIColor.systemBlue.cgColor
+        selectionBorderLayer.lineWidth = 2
+        selectionBorderLayer.lineDashPattern = [6, 4]
+        selectionBorderLayer.isHidden = true
+        layer.addSublayer(selectionBorderLayer)
+
+        // Move handle (top-left, blue)
+        moveHandle.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+        moveHandle.layer.cornerRadius = 6
+        moveHandle.layer.borderWidth = 1
+        moveHandle.layer.borderColor = UIColor.systemBlue.cgColor
+        moveIcon.image = UIImage(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+        moveIcon.tintColor = UIColor.systemBlue
+        moveIcon.contentMode = .scaleAspectFit
+        moveHandle.addSubview(moveIcon)
+        addSubview(moveHandle)
+
+        // Resize handle (bottom-right, orange)
+        resizeHandleVisual.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.12)
+        resizeHandleVisual.layer.cornerRadius = 6
+        resizeHandleVisual.layer.borderWidth = 1
+        resizeHandleVisual.layer.borderColor = UIColor.systemOrange.cgColor
+        resizeIcon.image = UIImage(systemName: "arrow.up.left.and.down.right")
+        resizeIcon.tintColor = UIColor.systemOrange
+        resizeIcon.contentMode = .scaleAspectFit
+        resizeHandleVisual.addSubview(resizeIcon)
+        resizeHitTarget.addSubview(resizeHandleVisual)
+        addSubview(resizeHitTarget)
+        resizeHitTarget.isUserInteractionEnabled = true
+
+        // Move handle pan
+        let movePan = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))
+        moveHandle.addGestureRecognizer(movePan)
+        moveHandle.isUserInteractionEnabled = true
+
+        // Body pan
+        let bodyPan = UIPanGestureRecognizer(target: self, action: #selector(handleBodyMovePan(_:)))
+        addGestureRecognizer(bodyPan)
+
+        // Resize handle pan
+        let resizePan = UIPanGestureRecognizer(target: self, action: #selector(handleResizePan(_:)))
+        resizeHitTarget.addGestureRecognizer(resizePan)
+
+        // Pinch gesture
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        pinchGesture = pinch
+        addGestureRecognizer(pinch)
+
+        // Tap to select
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelect))
+        addGestureRecognizer(tap)
+
+        updateHandleVisibility()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+
+        let handleSize: CGFloat = 16
+        moveHandle.frame = CGRect(x: -6, y: -6, width: handleSize, height: handleSize)
+        moveIcon.frame = moveHandle.bounds.insetBy(dx: 2, dy: 2)
+        let v = resizeVisualSize
+        resizeHitTarget.frame = CGRect(
+            x: bounds.width - v + 6,
+            y: bounds.height - v + 6,
+            width: v,
+            height: v
+        )
+        resizeHandleVisual.frame = resizeHitTarget.bounds
+        resizeIcon.frame = resizeHandleVisual.bounds.insetBy(dx: 3, dy: 3)
+
+        // Update selection border layer path to match the drawn shape
+        let inset = lineWidth / 2
+        let insetBounds = bounds.insetBy(dx: inset, dy: inset)
+        selectionBorderLayer.frame = bounds
+        switch shapeKind {
+        case .circle:
+            selectionBorderLayer.path = UIBezierPath(ovalIn: insetBounds).cgPath
+        case .rectangle:
+            selectionBorderLayer.path = UIBezierPath(roundedRect: insetBounds, cornerRadius: 4).cgPath
+        case .triangle:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: insetBounds.midX, y: insetBounds.minY))
+            path.addLine(to: CGPoint(x: insetBounds.maxX, y: insetBounds.maxY))
+            path.addLine(to: CGPoint(x: insetBounds.minX, y: insetBounds.maxY))
+            path.close()
+            selectionBorderLayer.path = path.cgPath
+        }
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        ctx.setStrokeColor(strokeColor.cgColor)
+        ctx.setLineWidth(lineWidth)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+
+        let insetRect = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
+        switch shapeKind {
+        case .circle:
+            UIBezierPath(ovalIn: insetRect).stroke()
+        case .rectangle:
+            UIBezierPath(roundedRect: insetRect, cornerRadius: 4).stroke()
+        case .triangle:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: insetRect.midX, y: insetRect.minY))
+            path.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY))
+            path.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY))
+            path.close()
+            strokeColor.setStroke()
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+    }
+
+    func applyStyle(strokeColor: UIColor, lineWidth: CGFloat) {
+        self.strokeColor = strokeColor
+        self.lineWidth = lineWidth
+        setNeedsDisplay()
+        setNeedsLayout()
+    }
+
+    func setSelectMode(_ enabled: Bool) {
+        isSelectMode = enabled
+        if !enabled { isSelected = false }
+        pinchGesture?.isEnabled = enabled
+        updateHandleVisibility()
+    }
+
+    func setSelected(_ selected: Bool) {
+        isSelected = selected
+        updateHandleVisibility()
+    }
+
+    private func updateHandleVisibility() {
+        let alpha: CGFloat = (isSelectMode && isSelected) ? 1.0 : 0.0
+        moveHandle.alpha = alpha
+        resizeHitTarget.alpha = alpha
+        selectionBorderLayer.isHidden = !(isSelectMode && isSelected)
+    }
+
+    @objc private func handleSelect() {
+        guard isSelectMode else { return }
+        isSelected = true
+        superview?.bringSubviewToFront(self)
+        onSelect?(id)
+        updateHandleVisibility()
+    }
+
+    @objc private func handleMovePan(_ gesture: UIPanGestureRecognizer) {
+        guard isSelectMode else { return }
+        guard let container = superview else { return }
+        let translation = gesture.translation(in: container)
+        switch gesture.state {
+        case .began:
+            startFrame = frame
+            isSelected = true
+            onSelect?(id)
+            updateHandleVisibility()
+        case .changed:
+            var newFrame = frame.offsetBy(dx: translation.x, dy: translation.y)
+            newFrame.origin.x = max(0, min(newFrame.origin.x, container.bounds.width - newFrame.width))
+            newFrame.origin.y = max(0, min(newFrame.origin.y, container.bounds.height - newFrame.height))
+            frame = newFrame
+            gesture.setTranslation(.zero, in: container)
+        case .ended, .cancelled:
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            onEndChange?(before, after)
+        default:
+            break
+        }
+    }
+
+    @objc private func handleBodyMovePan(_ gesture: UIPanGestureRecognizer) {
+        guard isSelectMode else { return }
+        guard let container = superview else { return }
+        let translation = gesture.translation(in: container)
+        switch gesture.state {
+        case .began:
+            startFrame = frame
+            isSelected = true
+            onSelect?(id)
+            superview?.bringSubviewToFront(self)
+            updateHandleVisibility()
+        case .changed:
+            var newFrame = frame.offsetBy(dx: translation.x, dy: translation.y)
+            newFrame.origin.x = max(0, min(newFrame.origin.x, container.bounds.width - newFrame.width))
+            newFrame.origin.y = max(0, min(newFrame.origin.y, container.bounds.height - newFrame.height))
+            frame = newFrame
+            gesture.setTranslation(.zero, in: container)
+        case .ended, .cancelled:
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            if before.frame != after.frame {
+                onEndChange?(before, after)
+            }
+        default:
+            break
+        }
+    }
+
+    @objc private func handleResizePan(_ gesture: UIPanGestureRecognizer) {
+        guard isSelectMode else { return }
+        guard let container = superview else { return }
+        let translation = gesture.translation(in: container)
+        switch gesture.state {
+        case .began:
+            startFrame = frame
+            isSelected = true
+            onSelect?(id)
+            resizeFeedback.prepare()
+            resizeFeedback.impactOccurred()
+            UIView.animate(withDuration: 0.15, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
+                self.resizeHandleVisual.transform = CGAffineTransform(scaleX: 1.18, y: 1.18)
+            }
+            updateHandleVisibility()
+        case .changed:
+            var newSize = CGSize(
+                width: max(minSize.width, frame.width + translation.x),
+                height: max(minSize.height, frame.height + translation.y)
+            )
+            if frame.origin.x + newSize.width > container.bounds.width {
+                newSize.width = container.bounds.width - frame.origin.x
+            }
+            if frame.origin.y + newSize.height > container.bounds.height {
+                newSize.height = container.bounds.height - frame.origin.y
+            }
+            frame = CGRect(origin: frame.origin, size: newSize)
+            gesture.setTranslation(.zero, in: container)
+        case .ended, .cancelled:
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
+                self.resizeHandleVisual.transform = .identity
+            }
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            if before.frame != after.frame {
+                onEndChange?(before, after)
+            }
+        default:
+            break
+        }
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard isSelectMode else { return }
+        guard let container = superview else { return }
+        switch gesture.state {
+        case .began:
+            pinchStartFrame = frame
+            startFrame = frame
+            isSelected = true
+            onSelect?(id)
+            superview?.bringSubviewToFront(self)
+            updateHandleVisibility()
+        case .changed:
+            let scale = gesture.scale
+            let center = CGPoint(x: pinchStartFrame.midX, y: pinchStartFrame.midY)
+            var newW = max(minSize.width, pinchStartFrame.width * scale)
+            var newH = max(minSize.height, pinchStartFrame.height * scale)
+            var newX = center.x - newW / 2
+            var newY = center.y - newH / 2
+            newX = max(0, min(newX, container.bounds.width - newW))
+            newY = max(0, min(newY, container.bounds.height - newH))
+            newW = min(newW, container.bounds.width - newX)
+            newH = min(newH, container.bounds.height - newY)
+            newW = max(minSize.width, newW)
+            newH = max(minSize.height, newH)
+            frame = CGRect(x: newX, y: newY, width: newW, height: newH)
+        case .ended, .cancelled:
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
             if before.frame != after.frame {
                 onEndChange?(before, after)
             }

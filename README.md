@@ -1,6 +1,6 @@
 # PDFEditorSDK
 
-`PDFEditorSDK` is a SwiftUI-first PDF editing component for iOS.
+`PDFEditorSDK` is a SwiftUI-first PDF and image editing SDK for iOS.
 
 ## Install from GitHub
 
@@ -37,21 +37,32 @@ To make that work for other developers, the repository needs:
 
 ## Project structure
 
-- `PDFEditorSDKDemo/App`: example host app for trying the SDK locally
-- `PDFEditorSDKDemo/SDK/Public`: public API surface such as `PDFEditorView`
-- `PDFEditorSDKDemo/SDK/Editor`: editor implementation and PDF editing pipeline
-- `PDFEditorSDKDemo/SDK/Support`: shared styling and helper UI pieces
-- `PDFEditorSDKDemo/Resources`: sample PDF and app resources for the demo target
+```
+Sources/PDFEditorSDK/
+├── PDFEditorSDK.swift          — public entry points (PDFEditorView, ImageEditorView)
+├── Editor/
+│   └── PDFEditorView.swift     — PDF editing pipeline
+├── ImageEditor/
+│   └── ImageEditorView.swift   — image editing pipeline
+└── Support/
+    └── Styling/                — shared view modifiers
+```
 
-## What it does
+---
+
+## PDF Editor
+
+### What it does
 
 - Opens an existing PDF from a `URL`
-- Supports form filling, highlights, drawing, text overlays, image overlays, and page insertion
-- Saves an editable PDF locally by embedding editor metadata back into the PDF
-- Exports a flattened PDF for sharing off-device
-- Preserves common PDF document metadata during flattened export
+- Supports form filling, text highlights, freehand drawing (pencil + finger), text overlays, image overlays, and blank page insertion
+- Saves an editable PDF locally by embedding overlay metadata back into the document
+- Exports a flattened PDF (annotations burned in) for sharing off-device
+- Preserves PDF document metadata (title, author, keywords, etc.) during export
+- Full undo / redo (up to 50 steps)
+- Apple Pencil and Scribble support
 
-## Basic usage
+### Basic usage
 
 ```swift
 import PDFEditorSDK
@@ -66,7 +77,7 @@ struct MyEditorScreen: View {
 }
 ```
 
-## Custom save destinations
+### Custom save destinations
 
 Use the optional callbacks if your app wants to control where editable or flattened files end up.
 
@@ -120,3 +131,92 @@ struct MyEditorScreen: View {
     }
 }
 ```
+
+---
+
+## Image Editor
+
+### What it does
+
+- Accepts any `UIImage` (or raw `Data`) as the canvas background
+- Freehand drawing with Apple Pencil or finger — adjustable colour, line weight, and eraser
+- Drag-to-create text boxes with configurable font size, bold, text colour, and background colour
+- Overlay cropped images from Camera or Photo Library — tap **Image** to pick, use the built-in system crop tool, then drag and pinch-resize the result on the canvas
+- All drawing and overlays are constrained to the image content area — no annotations outside the image
+- Select tool to move, resize, or delete any text box or image overlay
+- Full undo / redo (up to 50 steps)
+- Export flattens everything (drawing + text boxes + image overlays) into a single `UIImage` with selection handles automatically hidden
+
+### Basic usage
+
+```swift
+import PDFEditorSDK
+import SwiftUI
+
+struct MyImageEditorScreen: View {
+    let photo: UIImage
+
+    var body: some View {
+        NavigationStack {
+            ImageEditorView(image: photo)
+        }
+    }
+}
+```
+
+### Save and export
+
+The editor has two distinct actions:
+
+- **Save** (`square.and.arrow.down`) — saves the annotated image locally and shows a confirmation alert. If no `onSave` handler is provided, the image is saved as a JPEG to `Documents/ImageEdits/` inside the app sandbox.
+- **Export** (`square.and.arrow.up`) — renders the image and opens the system share sheet so the user can AirDrop, send, or save to Photos.
+
+```swift
+import PDFEditorSDK
+import SwiftUI
+
+struct MyImageEditorScreen: View {
+    let photo: UIImage
+
+    var body: some View {
+        NavigationStack {
+            ImageEditorView(
+                image: photo,
+                onSave: { savedImage in
+                    // Called when the user taps the save button.
+                    // savedImage is a flattened UIImage with all annotations burned in
+                    // and selection handles automatically hidden.
+                    UIImageWriteToSavedPhotosAlbum(savedImage, nil, nil, nil)
+                },
+                onExport: { exportedImage in
+                    // Called when the user taps the share button.
+                    // The share sheet is shown automatically — use this callback
+                    // if you also need a copy of the result in your own code.
+                    print("Exported: \(exportedImage.size)")
+                }
+            )
+        }
+    }
+}
+```
+
+Both callbacks are optional. Omitting `onSave` saves to `Documents/ImageEdits/`; omitting `onExport` still shows the share sheet but skips the callback.
+
+### Initialising from `Data`
+
+If you have image data rather than a `UIImage` (e.g. from a network response or document picker), use the `Data` initialiser:
+
+```swift
+ImageEditorView(imageData: imageData) { exportedImage in
+    // handle export
+}
+```
+
+### Toolbar overview
+
+| Section | Controls |
+|---|---|
+| **Draw** | Activate freehand drawing. Sub-tools: line weight (Fine / Medium / Thick), colour picker, eraser toggle, eraser size |
+| **Text** | Drag on the image to draw a text box. Sub-tools: text colour, background colour, font size, bold |
+| **Select** | Tap any text box or image overlay to select it. Drag to move, drag the orange handle to resize, tap **Delete** in the toolbar to remove |
+| **Image** | Add a photo from Camera or Photo Library with built-in crop. After placing, switch to Select to reposition or resize |

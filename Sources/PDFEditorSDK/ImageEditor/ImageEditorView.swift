@@ -13,13 +13,21 @@ import UIKit
 public struct ImageEditorView: View {
     @State private var viewModel: ImageEditorViewModel
 
-    public init(image: UIImage, onExport: ((UIImage) -> Void)? = nil) {
-        _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onExport: onExport))
+    public init(
+        image: UIImage,
+        onSave: ((UIImage) -> Void)? = nil,
+        onExport: ((UIImage) -> Void)? = nil
+    ) {
+        _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
     }
 
-    public init(imageData: Data, onExport: ((UIImage) -> Void)? = nil) {
+    public init(
+        imageData: Data,
+        onSave: ((UIImage) -> Void)? = nil,
+        onExport: ((UIImage) -> Void)? = nil
+    ) {
         let image = UIImage(data: imageData) ?? UIImage()
-        _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onExport: onExport))
+        _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
     }
 
     public var body: some View {
@@ -34,6 +42,7 @@ struct ImageFormEditorView: View {
     private let toolbarChipSize = CGSize(width: 56, height: 50)
     @State private var isShowingImagePicker = false
     @State private var imagePickerSource: ImagePickerSource = .photoLibrary
+    @State private var isShowingSaveAlert = false
     @State private var isShowingShareSheet = false
     @State private var exportedImage: UIImage?
 
@@ -65,6 +74,13 @@ struct ImageFormEditorView: View {
                     Image(systemName: "arrow.uturn.forward")
                 }
                 .disabled(!viewModel.canRedo)
+
+                Button {
+                    viewModel.saveImage()
+                    isShowingSaveAlert = true
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
 
                 Button {
                     if let image = viewModel.exportImage() {
@@ -100,6 +116,11 @@ struct ImageFormEditorView: View {
                 }
             }
         }
+        .alert("Save Image", isPresented: $isShowingSaveAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(viewModel.saveStatus ?? "No status")
+        }
         .sheet(isPresented: $isShowingShareSheet) {
             if let exportedImage {
                 ActivityView(activityItems: [exportedImage])
@@ -117,6 +138,8 @@ struct ImageFormEditorView: View {
         .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in
             viewModel.applyTextStyleToSelected()
         }
+        .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
+        .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
     }
 
     // MARK: - Toolbar
@@ -322,48 +345,13 @@ struct ImageFormEditorView: View {
 
                     toolbarDivider
 
-                    // MARK: Select Section
-                    VStack(spacing: 6) {
-                        Text("Select")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        HStack {
-                            Button {
-                                viewModel.setTool(.select)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "cursorarrow.rays")
-                                        .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Select")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
+                    // MARK: Shape Section
+                    imageShapeToolSection
 
-                            if viewModel.hasSelectedOverlayObject {
-                                Button {
-                                    viewModel.deleteSelectedObject()
-                                } label: {
-                                    VStack(spacing: 4) {
-                                        Image(systemName: "trash")
-                                            .fontWeight(.semibold)
-                                        Text("Delete")
-                                            .fontWeight(.semibold)
-                                    }
-                                    .foregroundStyle(.red)
-                                    .padding(6)
-                                    .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
+                    toolbarDivider
+
+                    // MARK: Select Section
+                    imageSelectToolSection
 
                     toolbarDivider
 
@@ -427,6 +415,220 @@ struct ImageFormEditorView: View {
             content()
         }
     }
+
+    private func iconName(for kind: OverlayShapeKind) -> String {
+        switch kind {
+        case .circle: return "circle"
+        case .rectangle: return "rectangle"
+        case .triangle: return "triangle"
+        }
+    }
+
+    private func labelText(for kind: OverlayShapeKind) -> String {
+        switch kind {
+        case .circle: return "Circle"
+        case .rectangle: return "Rect"
+        case .triangle: return "Tri"
+        }
+    }
+
+    // MARK: - Shape Tool Section
+
+    @ViewBuilder private var imageShapeToolSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Shape")
+                .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                Button { viewModel.setTool(.shape) } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "square.on.circle")
+                            .symbolVariant(viewModel.activeTool == .shape ? .fill : .none)
+                            .fontWeight(.semibold)
+                        Text("Shape").fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(6)
+                    .background(viewModel.activeTool == .shape ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.isShapeMode {
+                    imageShapeSubtoolsRow
+                }
+            }
+            .animation(.linear(duration: 0.2), value: viewModel.isShapeMode)
+        }
+    }
+
+    @ViewBuilder private var imageShapeSubtoolsRow: some View {
+        toolbarSubtoolsRow {
+            ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
+                Button { viewModel.activeShapeKind = kind } label: {
+                    toolbarChip {
+                        Image(systemName: iconName(for: kind)).fontWeight(.semibold)
+                        Text(labelText(for: kind)).fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(4)
+                    .background(toolbarChipBackground(isActive: viewModel.activeShapeKind == kind))
+                }
+                .buttonStyle(.plain)
+            }
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            Menu {
+                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "lineweight").fontWeight(.semibold)
+                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(4)
+                .background(toolbarChipBackground())
+            }
+        }
+    }
+
+    // MARK: - Select Tool Section
+
+    @ViewBuilder private var imageSelectToolSection: some View {
+        VStack(spacing: 6) {
+            Text("Select")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 8) {
+                Button {
+                    viewModel.setTool(.select)
+                } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: "cursorarrow.rays")
+                            .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
+                            .fontWeight(.semibold)
+                        Text("Select")
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .padding(6)
+                    .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .textBox {
+                    imageSelectTextBoxSubtools
+                }
+
+                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .shape {
+                    imageSelectShapeSubtools
+                }
+
+                if viewModel.hasSelectedOverlayObject {
+                    Button {
+                        viewModel.deleteSelectedObject()
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: "trash")
+                                .fontWeight(.semibold)
+                            Text("Delete")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(.red)
+                        .padding(6)
+                        .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .animation(.linear(duration: 0.2), value: viewModel.selectedOverlayKind)
+        }
+    }
+
+    @ViewBuilder private var imageSelectTextBoxSubtools: some View {
+        toolbarSubtoolsRow {
+            Menu {
+                Button("Black") { viewModel.textBoxTextColor = .label }
+                Button("White") { viewModel.textBoxTextColor = .white }
+                Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
+                Button("Red") { viewModel.textBoxTextColor = .systemRed }
+                Button("Green") { viewModel.textBoxTextColor = .systemGreen }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "square.fill")
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxTextColor))
+                    Text("Text").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
+                Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
+                Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
+                Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
+                Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "square.fill")
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                    Text("BG").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
+                Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
+                Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
+                Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "textformat.size").font(.title3).fontWeight(.semibold)
+                    Text("\(Int(viewModel.textBoxFontSize))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Button { viewModel.textBoxIsBold.toggle() } label: {
+                toolbarChip {
+                    Image(systemName: "bold").font(.title3).fontWeight(.semibold)
+                    Text("Bold").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder private var imageSelectShapeSubtools: some View {
+        toolbarSubtoolsRow {
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            Menu {
+                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "lineweight").fontWeight(.semibold)
+                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+        }
+    }
 }
 
 // MARK: - Drawing Image View Representable
@@ -454,6 +656,10 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         view.textBoxFontSize = viewModel.textBoxFontSize
         view.textBoxIsBold = viewModel.textBoxIsBold
         view.textBoxTextColor = viewModel.textBoxTextColor
+        view.isShapeMode = viewModel.activeTool == .shape
+        view.currentShapeKind = viewModel.activeShapeKind
+        view.shapeStrokeColor = viewModel.shapeStrokeColor
+        view.shapeLineWidth = viewModel.shapeLineWidth
     }
 }
 
@@ -474,24 +680,40 @@ class ImageEditorViewModel {
     var textBoxTextColor: UIColor = .label
     var hasSelectedOverlayObject: Bool = false
     var showImageSourceDialog: Bool = false
+    var saveStatus: String?
     var undoStack: [ImageUndoAction] = []
     var redoStack: [ImageUndoAction] = []
     weak var canvasView: DrawingImageView?
+    private let onSave: ((UIImage) -> Void)?
     private let onExport: ((UIImage) -> Void)?
     private let maxUndoActions = 50
+
+    var activeShapeKind: OverlayShapeKind = .rectangle
+    var shapeStrokeColor: UIColor = .systemRed
+    var shapeLineWidth: CGFloat = 2.0
+    var selectedOverlayKind: SelectedOverlayKind?
 
     var isDrawingMode: Bool { activeTool == .draw }
     var isTextMode: Bool { activeTool == .text }
     var isSelectMode: Bool { activeTool == .select }
+    var isShapeMode: Bool { activeTool == .shape }
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
-    init(sourceImage: UIImage, onExport: ((UIImage) -> Void)? = nil) {
+    init(sourceImage: UIImage, onSave: ((UIImage) -> Void)? = nil, onExport: ((UIImage) -> Void)? = nil) {
         self.sourceImage = sourceImage
+        self.onSave = onSave
         self.onExport = onExport
     }
 
     func setTool(_ tool: EditorTool) {
+        if tool == .shape {
+            activeTool = .shape
+            canvasView?.endTextEditing()
+            canvasView?.deselectAll()
+            isEraserMode = false
+            return
+        }
         if activeTool == tool, tool != .select {
             activeTool = .select
             canvasView?.endTextEditing()
@@ -510,6 +732,10 @@ class ImageEditorViewModel {
         }
     }
 
+    func applyShapeStyleToSelected() {
+        canvasView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
+    }
+
     func addOverlayImage(_ image: UIImage) {
         canvasView?.addOverlayImage(image)
     }
@@ -525,6 +751,38 @@ class ImageEditorViewModel {
             textColor: textBoxTextColor,
             backgroundColor: textBoxBackgroundColor
         )
+    }
+
+    func saveImage() {
+        guard let image = canvasView?.renderToImage() else {
+            saveStatus = "Failed to render image"
+            return
+        }
+
+        if let onSave {
+            onSave(image)
+            saveStatus = "Image saved"
+            return
+        }
+
+        // Default: save as JPEG to Documents/ImageEdits/
+        guard let data = image.jpegData(compressionQuality: 0.92) else {
+            saveStatus = "Failed to encode image"
+            return
+        }
+
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let folder = documents.appendingPathComponent("ImageEdits", isDirectory: true)
+
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let fileName = "Image-\(Int(Date().timeIntervalSince1970)).jpg"
+            let destination = folder.appendingPathComponent(fileName)
+            try data.write(to: destination)
+            saveStatus = "Saved to: \(fileName)"
+        } catch {
+            saveStatus = "Failed to save image"
+        }
     }
 
     @discardableResult
@@ -568,6 +826,11 @@ class ImageEditorViewModel {
                 return .imageBox(add: current, remove: remove)
             }
             return action
+        case .imageShape(let add, let remove):
+            if let add, let current = canvasView?.shapeBoxState(id: add.id) {
+                return .imageShape(add: current, remove: remove)
+            }
+            return action
         default:
             return action
         }
@@ -600,6 +863,11 @@ class ImageEditorViewModel {
             }
         case .imageBoxUpdate(let before, _):
             canvasView?.updateImageBox(from: before)
+        case .imageShape(let add, let remove):
+            if let add { canvasView?.removeShapeBox(id: add.id) }
+            if let remove { canvasView?.addShapeBox(from: remove) }
+        case .imageShapeUpdate(let before, _):
+            canvasView?.updateShapeBox(from: before)
         }
     }
 
@@ -630,6 +898,11 @@ class ImageEditorViewModel {
             }
         case .imageBoxUpdate(_, let after):
             canvasView?.updateImageBox(from: after)
+        case .imageShape(let add, let remove):
+            if let add { canvasView?.addShapeBox(from: add) }
+            if let remove { canvasView?.removeShapeBox(id: remove.id) }
+        case .imageShapeUpdate(_, let after):
+            canvasView?.updateShapeBox(from: after)
         }
     }
 }
@@ -642,6 +915,8 @@ enum ImageUndoAction {
     case textBox(add: OverlayTextBoxState?, remove: OverlayTextBoxState?)
     case imageBox(add: OverlayImageState?, remove: OverlayImageState?)
     case imageBoxUpdate(before: OverlayImageState, after: OverlayImageState)
+    case imageShape(add: OverlayShapeState?, remove: OverlayShapeState?)
+    case imageShapeUpdate(before: OverlayShapeState, after: OverlayShapeState)
 }
 
 // MARK: - InkStroke
@@ -754,6 +1029,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             guard oldValue != isSelectMode else { return }
             textBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+            shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             if !isSelectMode {
                 deselectAll()
             }
@@ -776,8 +1052,23 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     private var eraserAffectedStrokes: [UUID: (old: InkStroke, new: InkStroke?)] = [:]
     private var textBoxViews: [UUID: TextBoxView] = [:]
     private var imageBoxViews: [UUID: ImageBoxView] = [:]
+    private var shapeBoxViews: [UUID: ShapeBoxView] = [:]
     private var selectedTextBoxID: UUID?
     private var selectedImageBoxID: UUID?
+    private var selectedShapeID: UUID?
+    private var shapePanGesture: UIPanGestureRecognizer?
+    private var shapeStartPoint: CGPoint?
+    private let shapePreviewLayer = CAShapeLayer()
+    var currentShapeKind: OverlayShapeKind = .rectangle
+    var shapeStrokeColor: UIColor = .systemRed
+    var shapeLineWidth: CGFloat = 2.0
+
+    var isShapeMode = false {
+        didSet {
+            shapePanGesture?.isEnabled = isShapeMode
+            if !isShapeMode { shapePreviewLayer.isHidden = true }
+        }
+    }
 
     private var pencilGesture: PencilDrawingGestureRecognizer?
     private var fingerPanGesture: UIPanGestureRecognizer?
@@ -850,6 +1141,30 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         overlayView.layer.mask = overlayViewMask
 
         setupGestures()
+        setupShapePreviewLayer()
+        setupShapePanGesture()
+    }
+
+    private func setupShapePreviewLayer() {
+        shapePreviewLayer.strokeColor = UIColor.systemOrange.withAlphaComponent(0.9).cgColor
+        shapePreviewLayer.fillColor = UIColor.clear.cgColor
+        shapePreviewLayer.lineWidth = 1.5
+        shapePreviewLayer.lineDashPattern = [6, 4]
+        shapePreviewLayer.isHidden = true
+        layer.addSublayer(shapePreviewLayer)
+    }
+
+    private func setupShapePanGesture() {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleShapePan(_:)))
+        pan.cancelsTouchesInView = true
+        pan.allowedTouchTypes = [
+            NSNumber(value: UITouch.TouchType.direct.rawValue),
+            NSNumber(value: UITouch.TouchType.pencil.rawValue)
+        ]
+        pan.delegate = self
+        pan.isEnabled = false
+        addGestureRecognizer(pan)
+        shapePanGesture = pan
     }
 
     private func setupGestures() {
@@ -1152,6 +1467,125 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         textBoxPreviewLayer.path = UIBezierPath(rect: rect).cgPath
     }
 
+    // MARK: - Shape Pan Gesture
+
+    @objc private func handleShapePan(_ gesture: UIPanGestureRecognizer) {
+        guard isShapeMode else { return }
+        let viewPoint = gesture.location(in: self)
+        switch gesture.state {
+        case .began:
+            shapeStartPoint = viewPoint
+            shapePreviewLayer.isHidden = false
+            updateShapePreview(from: viewPoint, to: viewPoint)
+        case .changed:
+            guard let start = shapeStartPoint else { return }
+            updateShapePreview(from: start, to: viewPoint)
+        case .ended, .cancelled:
+            guard let start = shapeStartPoint else { return }
+            shapePreviewLayer.isHidden = true
+            shapeStartPoint = nil
+            let rectInView = rectFrom(start, to: viewPoint).insetBy(dx: -2, dy: -2)
+            if rectInView.width >= 20, rectInView.height >= 20 {
+                createShapeBox(with: rectInView)
+            }
+        default:
+            break
+        }
+    }
+
+    private func updateShapePreview(from start: CGPoint, to end: CGPoint) {
+        let rect = rectFrom(start, to: end)
+        switch currentShapeKind {
+        case .circle:
+            shapePreviewLayer.path = UIBezierPath(ovalIn: rect).cgPath
+        case .rectangle:
+            shapePreviewLayer.path = UIBezierPath(roundedRect: rect, cornerRadius: 4).cgPath
+        case .triangle:
+            let path = UIBezierPath()
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            path.close()
+            shapePreviewLayer.path = path.cgPath
+        }
+    }
+
+    private func createShapeBox(with rectInView: CGRect) {
+        let normalised = CGRect(
+            origin: rectInView.origin,
+            size: CGSize(width: max(rectInView.width, 30), height: max(rectInView.height, 30))
+        )
+        let state = OverlayShapeState(
+            id: UUID(),
+            frame: normalised,
+            kind: currentShapeKind,
+            strokeColor: shapeStrokeColor,
+            lineWidth: shapeLineWidth
+        )
+        addShapeBox(from: state)
+        viewModel?.didMakeChange(.imageShape(add: state, remove: nil))
+    }
+
+    // MARK: - Shape Box Overlay Methods
+
+    func addShapeBox(from state: OverlayShapeState) {
+        let box = ShapeBoxView(id: state.id, kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.frame = state.frame
+        box.setSelectMode(isSelectMode)
+        box.onSelect = { [weak self] id in self?.selectShapeBox(id: id) }
+        box.onEndChange = { [weak self] before, after in
+            guard before.frame != after.frame else { return }
+            self?.viewModel?.didMakeChange(.imageShapeUpdate(before: before, after: after))
+        }
+        overlayView.addSubview(box)
+        shapeBoxViews[state.id] = box
+    }
+
+    func removeShapeBox(id: UUID) {
+        shapeBoxViews[id]?.removeFromSuperview()
+        shapeBoxViews[id] = nil
+        if selectedShapeID == id {
+            selectedShapeID = nil
+            syncSelection()
+        }
+    }
+
+    func shapeBoxState(id: UUID) -> OverlayShapeState? {
+        guard let box = shapeBoxViews[id] else { return nil }
+        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+    }
+
+    func updateShapeBox(from state: OverlayShapeState) {
+        guard let box = shapeBoxViews[state.id] else { return }
+        box.frame = state.frame
+        box.applyStyle(strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+    }
+
+    func applyShapeStyleToSelected(strokeColor: UIColor, lineWidth: CGFloat) {
+        guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
+        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        box.applyStyle(strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
+        if before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
+            viewModel?.didMakeChange(.imageShapeUpdate(before: before, after: after))
+        }
+    }
+
+    private func selectShapeBox(id: UUID) {
+        selectedShapeID = id
+        selectedTextBoxID = nil
+        selectedImageBoxID = nil
+        viewModel?.selectedOverlayKind = .shape
+        if let box = shapeBoxViews[id] {
+            viewModel?.shapeStrokeColor = box.strokeColor
+            viewModel?.shapeLineWidth = box.lineWidth
+        }
+        updateSelectionUI()
+        if let box = shapeBoxViews[id] {
+            overlayView.bringSubviewToFront(box)
+        }
+    }
+
     private func rectFrom(_ start: CGPoint, to end: CGPoint) -> CGRect {
         let origin = CGPoint(x: min(start.x, end.x), y: min(start.y, end.y))
         let size = CGSize(width: abs(end.x - start.x), height: abs(end.y - start.y))
@@ -1298,6 +1732,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func selectTextBox(id: UUID) {
         selectedTextBoxID = id
         selectedImageBoxID = nil
+        selectedShapeID = nil
+        viewModel?.selectedOverlayKind = .textBox
         updateSelectionUI()
         if let box = textBoxViews[id] {
             overlayView.bringSubviewToFront(box)
@@ -1307,6 +1743,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func selectImageBox(id: UUID) {
         selectedImageBoxID = id
         selectedTextBoxID = nil
+        selectedShapeID = nil
+        viewModel?.selectedOverlayKind = .image
         updateSelectionUI()
         if let box = imageBoxViews[id] {
             overlayView.bringSubviewToFront(box)
@@ -1316,6 +1754,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func deselectAll() {
         selectedTextBoxID = nil
         selectedImageBoxID = nil
+        selectedShapeID = nil
+        viewModel?.selectedOverlayKind = nil
         updateSelectionUI()
     }
 
@@ -1328,6 +1768,11 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         if let selectedImageBoxID, let state = imageBoxState(id: selectedImageBoxID) {
             removeImageBox(id: selectedImageBoxID)
             viewModel?.didMakeChange(.imageBox(add: nil, remove: state))
+            return
+        }
+        if let selectedShapeID, let state = shapeBoxState(id: selectedShapeID) {
+            removeShapeBox(id: selectedShapeID)
+            viewModel?.didMakeChange(.imageShape(add: nil, remove: state))
         }
     }
 
@@ -1338,11 +1783,14 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         for (id, box) in imageBoxViews {
             box.setSelected(id == selectedImageBoxID)
         }
+        for (id, box) in shapeBoxViews {
+            box.setSelected(id == selectedShapeID)
+        }
         syncSelection()
     }
 
     private func syncSelection() {
-        viewModel?.hasSelectedOverlayObject = (selectedTextBoxID != nil || selectedImageBoxID != nil)
+        viewModel?.hasSelectedOverlayObject = (selectedTextBoxID != nil || selectedImageBoxID != nil || selectedShapeID != nil)
     }
 
     // MARK: - Eraser Visual
@@ -1373,19 +1821,42 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     // MARK: - Export
 
     func renderToImage() -> UIImage {
-        // Hide all selection handles before capturing
-        deselectAll()
-        endTextEditing()
+        // Force-hide handles with no implicit CA animations.
+        // setSelectMode(false) sets alpha = 0 on move/resize handles immediately,
+        // regardless of current selection state, which drawHierarchy would otherwise
+        // still capture via the presentation layer.
+        UIView.performWithoutAnimation {
+            textBoxViews.values.forEach { $0.setSelectMode(false) }
+            imageBoxViews.values.forEach { $0.setSelectMode(false) }
+            shapeBoxViews.values.forEach { $0.setSelectMode(false) }
+            endTextEditing()
+        }
 
         let imgRect = imageContentRect
-        guard imgRect.width > 0, imgRect.height > 0 else { return UIImage() }
-
-        // Render only the image content area, cropping out any letterbox space
-        let renderer = UIGraphicsImageRenderer(size: imgRect.size)
-        return renderer.image { ctx in
-            ctx.cgContext.translateBy(x: -imgRect.origin.x, y: -imgRect.origin.y)
-            drawHierarchy(in: bounds, afterScreenUpdates: false)
+        guard imgRect.width > 0, imgRect.height > 0 else {
+            restoreSelectMode()
+            return UIImage()
         }
+
+        // afterScreenUpdates: true ensures the presentation layer reflects the
+        // alpha = 0 changes we just made before the snapshot is taken.
+        let renderer = UIGraphicsImageRenderer(size: imgRect.size)
+        let result = renderer.image { ctx in
+            ctx.cgContext.translateBy(x: -imgRect.origin.x, y: -imgRect.origin.y)
+            drawHierarchy(in: bounds, afterScreenUpdates: true)
+        }
+
+        restoreSelectMode()
+        return result
+    }
+
+    private func restoreSelectMode() {
+        // Restore the current select-mode state on all overlay boxes after export.
+        textBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+        imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+        shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+        // Re-apply current selection highlight if still in select mode
+        if isSelectMode { updateSelectionUI() }
     }
 
     // MARK: - Gesture Recognizer Delegate
@@ -1394,6 +1865,16 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         if gestureRecognizer === textBoxPanGesture {
             guard isTextMode else { return false }
             // Only allow text box creation within the image content area
+            let selfPoint = gestureRecognizer.location(in: self)
+            guard imageContentRect.contains(selfPoint) else { return false }
+            let overlayPoint = gestureRecognizer.location(in: overlayView)
+            if let hitView = overlayView.hitTest(overlayPoint, with: nil),
+               hitView !== overlayView {
+                return false
+            }
+        }
+        if gestureRecognizer === shapePanGesture {
+            guard isShapeMode else { return false }
             let selfPoint = gestureRecognizer.location(in: self)
             guard imageContentRect.contains(selfPoint) else { return false }
             let overlayPoint = gestureRecognizer.location(in: overlayView)
