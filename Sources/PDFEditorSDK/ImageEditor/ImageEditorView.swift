@@ -149,6 +149,11 @@ struct ImageFormEditorView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
 
+                    // MARK: Select Section
+                    imageSelectToolSection
+
+                    toolbarDivider
+
                     // MARK: Draw Section
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Draw")
@@ -347,11 +352,6 @@ struct ImageFormEditorView: View {
 
                     // MARK: Shape Section
                     imageShapeToolSection
-
-                    toolbarDivider
-
-                    // MARK: Select Section
-                    imageSelectToolSection
 
                     toolbarDivider
 

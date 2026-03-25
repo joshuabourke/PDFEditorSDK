@@ -248,6 +248,13 @@ struct PDFFormEditorView: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: 12) {
+                    selectToolSection
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.25))
+                        .frame(width: 1, height: 36)
+                        .padding(.top, 14)
+
                     VStack(spacing: 6) {
                         Text("Form")
                             .font(.caption2)
@@ -511,13 +518,6 @@ struct PDFFormEditorView: View {
                         .padding(.top, 14)
 
                     shapeToolSection
-
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
-
-                    selectToolSection
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
