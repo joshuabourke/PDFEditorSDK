@@ -14,25 +14,18 @@ import CoreText
 
 // MARK: - Main App View
 struct PDFEditorHomeView: View {
-    @State private var viewModel = PDFFormViewModel()
     @State private var path: [EditorRoute] = []
-    
+
     var body: some View {
         NavigationStack(path: $path) {
             PDFBrowseView(
-                viewModel: viewModel,
-                onOpen: { path.append(.editor) },
-                onCreate: {
-                    if viewModel.loadPDF() {
-                        path.append(.editor)
-                    }
-                }
+                onOpen: { url in path.append(.editor(url)) }
             )
             .navigationDestination(for: EditorRoute.self) { route in
                 switch route {
-                case .editor:
-                    PDFFormEditorView(
-                        viewModel: viewModel,
+                case .editor(let url):
+                    PDFEditorHomeContainer(
+                        url: url,
                         showsDismissButton: true,
                         onSaveNavigate: { path.removeAll() }
                     )
@@ -43,7 +36,27 @@ struct PDFEditorHomeView: View {
 }
 
 enum EditorRoute: Hashable {
-    case editor
+    case editor(URL)
+}
+
+private struct PDFEditorHomeContainer: View {
+    @State private var viewModel: PDFFormViewModel
+    let showsDismissButton: Bool
+    let onSaveNavigate: (() -> Void)?
+
+    init(url: URL, showsDismissButton: Bool = false, onSaveNavigate: (() -> Void)? = nil) {
+        _viewModel = State(initialValue: PDFFormViewModel(documentURL: url))
+        self.showsDismissButton = showsDismissButton
+        self.onSaveNavigate = onSaveNavigate
+    }
+
+    var body: some View {
+        PDFFormEditorView(
+            viewModel: viewModel,
+            showsDismissButton: showsDismissButton,
+            onSaveNavigate: onSaveNavigate
+        )
+    }
 }
 
 struct PDFFormEditorView: View {
@@ -52,16 +65,17 @@ struct PDFFormEditorView: View {
     var onSaveNavigate: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     private let toolbarChipSize = CGSize(width: 56, height: 50)
-    @State private var isShowingImporter = false
     @State private var isShowingSaveAlert = false
     @State private var isShowingExportAlert = false
-    @State private var isShowingOpenAlert = false
     @State private var isShowingImagePicker = false
     @State private var imagePickerSource: ImagePickerSource = .photoLibrary
     @State private var isShowingShareSheet = false
     @State private var exportURL: URL?
     @State private var isShowingInsertPageSheet = false
     @State private var insertPageIndex = 0
+    
+    ///This is tracking to see if the user has made changes to a document, this is used to display an alert if they attempt to exit without saving.
+    @State private var changesNotSaved: Bool = false
     
     var body: some View {
         coreEditorView
@@ -108,6 +122,22 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
+            .alert("Unsaved Changes", isPresented: $changesNotSaved) {
+                Button("Save Changes") {
+                    viewModel.savePDF()
+                    if let onSaveNavigate {
+                        onSaveNavigate()
+                    } else {
+                        dismiss()
+                    }
+                }
+                Button("Discard & Close", role: .destructive) {
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("You have unsaved changes. Would you like to save before closing?")
+            }
     }
 
     private var coreEditorView: some View {
@@ -144,9 +174,13 @@ struct PDFFormEditorView: View {
             if showsDismissButton {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        dismiss()
+                        if !viewModel.undoStack.isEmpty {
+                            changesNotSaved.toggle()
+                        } else {
+                            dismiss()
+                        }
                     } label: {
-                        Label("Documents", systemImage: "doc.text")
+                        Text("Close")
                     }
                 }
             }
@@ -164,12 +198,6 @@ struct PDFFormEditorView: View {
                     Image(systemName: "arrow.uturn.forward")
                 }
                 .disabled(!viewModel.canRedo)
-
-                Button {
-                    isShowingImporter = true
-                } label: {
-                    Image(systemName: "folder")
-                }
 
                 Button {
                     viewModel.savePDF()
@@ -191,21 +219,6 @@ struct PDFFormEditorView: View {
                 }
             }
         }
-        .fileImporter(
-            isPresented: $isShowingImporter,
-            allowedContentTypes: [.pdf],
-            allowsMultipleSelection: false
-        ) { result in
-            switch result {
-            case .success(let urls):
-                guard let url = urls.first else { return }
-                if !viewModel.loadPDF(from: url) {
-                    isShowingOpenAlert = true
-                }
-            case .failure:
-                break
-            }
-        }
         .alert("Save PDF", isPresented: $isShowingSaveAlert, actions: {
             Button("OK", role: .cancel) { }
         }, message: {
@@ -215,11 +228,6 @@ struct PDFFormEditorView: View {
             Button("OK", role: .cancel) { }
         }, message: {
             Text(viewModel.exportStatus ?? "No status")
-        })
-        .alert("Open PDF", isPresented: $isShowingOpenAlert, actions: {
-            Button("OK", role: .cancel) { }
-        }, message: {
-            Text(viewModel.openStatus ?? "Failed to open PDF")
         })
         .confirmationDialog(
             "Add image to form field",
@@ -459,6 +467,7 @@ struct PDFFormEditorView: View {
                                         Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
                                         Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
                                         Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
+                                        Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
                                     } label: {
                                         toolbarChip {
                                             Image(systemName: "square.fill")
@@ -960,19 +969,18 @@ class PDFFormViewModel {
     private var pendingFormWidgetAnnotation: PDFAnnotation?
     private let editableSaveHandler: PDFEditorFileHandler?
     private let flattenedExportHandler: PDFEditorFileHandler?
-    
+    let shouldHighlightFormField: ((PDFFormFieldInfo) -> Bool)?
+
     init(
-        documentURL: URL? = nil,
+        documentURL: URL,
         editableSaveHandler: PDFEditorFileHandler? = nil,
-        flattenedExportHandler: PDFEditorFileHandler? = nil
+        flattenedExportHandler: PDFEditorFileHandler? = nil,
+        shouldHighlightFormField: ((PDFFormFieldInfo) -> Bool)? = nil
     ) {
         self.editableSaveHandler = editableSaveHandler
         self.flattenedExportHandler = flattenedExportHandler
-        if let documentURL {
-            _ = loadPDF(from: documentURL)
-        } else {
-            _ = loadPDF()
-        }
+        self.shouldHighlightFormField = shouldHighlightFormField
+        _ = loadPDF(from: documentURL)
     }
     
     var activeShapeKind: OverlayShapeKind = .rectangle
@@ -984,27 +992,6 @@ class PDFFormViewModel {
     var isTextMode: Bool { activeTool == .text }
     var isSelectMode: Bool { activeTool == .select }
     var isShapeMode: Bool { activeTool == .shape }
-    
-    @discardableResult
-    func loadPDF() -> Bool {
-        if let url = Bundle.main.url(forResource: "SampleForm", withExtension: "pdf") {
-            currentDocumentURL = url
-            pdfDocument = PDFDocument(url: url)
-        } else {
-            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let pdfURL = documentsPath.appendingPathComponent("SampleForm.pdf")
-            currentDocumentURL = pdfURL
-            pdfDocument = PDFDocument(url: pdfURL)
-        }
-        guard pdfDocument != nil else {
-            openStatus = "Failed to load template PDF"
-            return false
-        }
-        didLoadOverlayMetadata = false
-        needsOverlayRestore = true
-        updatePageMetrics()
-        return true
-    }
     
     @discardableResult
     func loadPDF(from url: URL) -> Bool {
@@ -1845,6 +1832,7 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.shapeLineWidth = viewModel.shapeLineWidth
         pdfView.setFormFieldEntryEnabled(viewModel.activeTool == .form)
         pdfView.isUserInteractionEnabled = !viewModel.pageScrollLocked
+        pdfView.formFieldHighlightFilter = viewModel.shouldHighlightFormField
     }
 }
 
@@ -1914,29 +1902,33 @@ struct PDFThumbnailStrip: View {
 }
 
 struct PDFBrowseView: View {
-    @Bindable var viewModel: PDFFormViewModel
     @State private var files: [URL] = []
-    var onOpen: (() -> Void)?
-    var onCreate: (() -> Void)?
+    var onOpen: ((URL) -> Void)?
+    @State private var openError: String?
     @State private var isShowingOpenAlert = false
     @State private var isShowingFileImporter = false
-    
+
     var body: some View {
         List {
             Section("Create") {
                 Button {
-                    onCreate?()
+                    if let url = templateURL() {
+                        onOpen?(url)
+                    } else {
+                        openError = "Could not find template PDF."
+                        isShowingOpenAlert = true
+                    }
                 } label: {
                     Label("New From Template", systemImage: "doc.badge.plus")
                 }
-                
+
                 Button {
                     isShowingFileImporter = true
                 } label: {
                     Label("Open From Files", systemImage: "folder")
                 }
             }
-            
+
             if files.isEmpty {
                 ContentUnavailableView(
                     "No Saved PDFs",
@@ -1947,11 +1939,7 @@ struct PDFBrowseView: View {
                 Section("Saved") {
                     ForEach(files, id: \.self) { url in
                         Button {
-                            if viewModel.loadPDF(from: url) {
-                                onOpen?()
-                            } else {
-                                isShowingOpenAlert = true
-                            }
+                            onOpen?(url)
                         } label: {
                             HStack {
                                 Image(systemName: "doc.richtext")
@@ -1976,17 +1964,26 @@ struct PDFBrowseView: View {
                 guard let url = urls.first else { return }
                 openImportedFile(url)
             case .failure:
-                viewModel.openStatus = "Failed to open file from Files."
+                openError = "Failed to open file from Files."
                 isShowingOpenAlert = true
             }
         }
         .alert("Open PDF", isPresented: $isShowingOpenAlert, actions: {
             Button("OK", role: .cancel) { }
         }, message: {
-            Text(viewModel.openStatus ?? "Failed to open PDF")
+            Text(openError ?? "Failed to open PDF")
         })
     }
-    
+
+    private func templateURL() -> URL? {
+        if let url = Bundle.main.url(forResource: "SampleForm", withExtension: "pdf") {
+            return url
+        }
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = documentsPath.appendingPathComponent("SampleForm.pdf")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
     private func loadFiles() {
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let folderURL = documentsPath.appendingPathComponent("PDFEdits", isDirectory: true)
@@ -1997,13 +1994,13 @@ struct PDFBrowseView: View {
             return leftDate > rightDate
         }
     }
-    
+
     private func openImportedFile(_ url: URL) {
         let didStart = url.startAccessingSecurityScopedResource()
         defer {
             if didStart { url.stopAccessingSecurityScopedResource() }
         }
-        
+
         let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let folderURL = documentsPath.appendingPathComponent("PDFEdits", isDirectory: true)
         do {
@@ -2013,19 +2010,14 @@ struct PDFBrowseView: View {
                 try FileManager.default.removeItem(at: destinationURL)
             }
             try FileManager.default.copyItem(at: url, to: destinationURL)
-            
-            if viewModel.loadPDF(from: destinationURL) {
-                loadFiles()
-                onOpen?()
-            } else {
-                isShowingOpenAlert = true
-            }
+            loadFiles()
+            onOpen?(destinationURL)
         } catch {
-            viewModel.openStatus = "Failed to import PDF from Files."
+            openError = "Failed to import PDF from Files."
             isShowingOpenAlert = true
         }
     }
-    
+
     private func uniqueDestinationURL(for sourceURL: URL, in folderURL: URL) -> URL {
         let baseName = sourceURL.deletingPathExtension().lastPathComponent
         let ext = sourceURL.pathExtension.isEmpty ? "pdf" : sourceURL.pathExtension
@@ -2093,11 +2085,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         didSet {
             if isDrawingMode || isTextMode {
                 disableTextSelection()
-                if let scribble = scribbleInteraction { removeInteraction(scribble) }
             } else {
                 enableTextSelection()
-                if let scribble = scribbleInteraction { addInteraction(scribble) }
             }
+            syncScribbleInteraction()
             
             if !isDrawingMode {
                 hideEraserCircle()
@@ -2113,11 +2104,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     var isTextMode = false {
         didSet {
             textBoxPanGesture?.isEnabled = isTextMode
-            if isTextMode {
-                if let scribble = scribbleInteraction { removeInteraction(scribble) }
-            } else if !isDrawingMode {
-                if let scribble = scribbleInteraction { addInteraction(scribble) }
-            }
+            syncScribbleInteraction()
             
             if isDrawingMode || isTextMode {
                 disableTextSelection()
@@ -2145,6 +2132,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 deselectInkAnnotation()
                 deselectOverlaySelection()
             }
+            syncScribbleInteraction()
         }
     }
     
@@ -2258,6 +2246,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     /// Sits above PDF page tiles (below `textBoxOverlayView`) so field highlights show through opaque widget appearances.
     private let formFieldHighlightHostView = UIView()
     private let formFieldHighlightLayer = CAShapeLayer()
+    var formFieldHighlightFilter: ((PDFFormFieldInfo) -> Bool)?
     private var textBoxViews: [UUID: TextBoxView] = [:]
     private var imageBoxViews: [UUID: ImageBoxView] = [:]
     private var shapeBoxViews: [UUID: ShapeBoxView] = [:]
@@ -2274,6 +2263,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         didSet {
             shapePanGesture?.isEnabled = isShapeMode
             if !isShapeMode { shapePreviewLayer.isHidden = true }
+            syncScribbleInteraction()
         }
     }
     private var movingInkAnnotation: PDFAnnotation?
@@ -2715,6 +2705,23 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 let hasWidgetFieldKind = !annotation.widgetFieldType.rawValue.isEmpty
                 guard isWidgetSubtype || hasFieldName || hasWidgetFieldKind else { continue }
                 guard annotation.bounds.width > 0, annotation.bounds.height > 0 else { continue }
+                let ffFlags = (annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/Ff")) as? NSNumber)?.intValue ?? 0
+                let fFlags  = (annotation.value(forAnnotationKey: PDFAnnotationKey(rawValue: "/F"))  as? NSNumber)?.intValue ?? 0
+                let isReadOnly       = (ffFlags & 1)   != 0  // /Ff bit 0
+                let isAnnotationLocked = (fFlags & 128) != 0  // /F  bit 8
+                let shouldHighlight: Bool
+                if let filter = formFieldHighlightFilter {
+                    let info = PDFFormFieldInfo(
+                        fieldName: annotation.fieldName,
+                        isReadOnly: isReadOnly,
+                        isAnnotationLocked: isAnnotationLocked
+                    )
+                    shouldHighlight = filter(info)
+                } else {
+                    // Default: skip fields that are read-only or annotation-locked.
+                    shouldHighlight = !isReadOnly && !isAnnotationLocked
+                }
+                guard shouldHighlight else { continue }
                 didFindWidgets = true
                 let rectInView = convert(annotation.bounds, from: page)
                 let rectInHost = formFieldHighlightHostView.convert(rectInView, from: self)
@@ -3782,7 +3789,27 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         addInteraction(interaction)
         scribbleInteraction = interaction
     }
-    
+
+    /// Single source of truth for whether the scribble interaction should be
+    /// active. Scribble is only useful in form-filling mode; in every other
+    /// active tool mode the pencil is driving gestures (drawing, selecting,
+    /// moving overlays, placing shapes) and the interaction would intercept
+    /// those touches before the gesture recognisers can respond.
+    ///
+    /// UITextView handles Scribble natively via its own UITextInteraction, so
+    /// text boxes receive pencil-written text automatically whenever they are
+    /// first-responder — no extra wiring is needed here for that case.
+    private func syncScribbleInteraction() {
+        guard let scribble = scribbleInteraction else { return }
+        let shouldEnable = !isDrawingMode && !isTextMode && !isSelectMode && !isShapeMode
+        let isAdded = interactions.contains { $0 === scribble }
+        if shouldEnable && !isAdded {
+            addInteraction(scribble)
+        } else if !shouldEnable && isAdded {
+            removeInteraction(scribble)
+        }
+    }
+
     // MARK: - Form Field Tracking
     
     private func setupTextSelectionObserver() {
@@ -4108,9 +4135,11 @@ final class TextBoxView: UIView, UITextViewDelegate {
     var onSelect: ((UUID) -> Void)?
     let id: UUID
     private var startFrame: CGRect = .zero
+    private var pinchStartFrame: CGRect = .zero
     private var bodyMovePan: UIPanGestureRecognizer?
     private var moveHandlePan: UIPanGestureRecognizer?
     private var resizeHandlePan: UIPanGestureRecognizer?
+    private var pinchGesture: UIPinchGestureRecognizer?
     
     init(id: UUID) {
         self.id = id
@@ -4176,7 +4205,11 @@ final class TextBoxView: UIView, UITextViewDelegate {
         
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelect))
         addGestureRecognizer(tap)
-        
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        addGestureRecognizer(pinch)
+        pinchGesture = pinch
+
         isSelected = true
     }
     
@@ -4235,6 +4268,7 @@ final class TextBoxView: UIView, UITextViewDelegate {
         bodyMovePan?.isEnabled = enabled
         moveHandlePan?.isEnabled = enabled
         resizeHandlePan?.isEnabled = enabled
+        pinchGesture?.isEnabled = enabled
         if !enabled { isSelected = false }
         updateSelectionUI()
     }
@@ -4306,6 +4340,31 @@ final class TextBoxView: UIView, UITextViewDelegate {
         }
         frame = CGRect(origin: frame.origin, size: newSize)
         gesture.setTranslation(.zero, in: container)
+    }
+
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        guard isSelectMode, let container = superview else { return }
+        switch gesture.state {
+        case .began:
+            pinchStartFrame = frame
+            isSelected = true
+            superview?.bringSubviewToFront(self)
+            onSelect?(id)
+        case .changed:
+            let scale = gesture.scale
+            let center = CGPoint(x: pinchStartFrame.midX, y: pinchStartFrame.midY)
+            var newW = max(minSize.width,  pinchStartFrame.width  * scale)
+            var newH = max(minSize.height, pinchStartFrame.height * scale)
+            var newX = center.x - newW / 2
+            var newY = center.y - newH / 2
+            newX = max(0, min(newX, container.bounds.width  - newW))
+            newY = max(0, min(newY, container.bounds.height - newH))
+            newW = min(newW, container.bounds.width  - newX)
+            newH = min(newH, container.bounds.height - newY)
+            frame = CGRect(x: newX, y: newY, width: newW, height: newH)
+        default:
+            break
+        }
     }
     
     func applyTextStyle(fontSize: CGFloat, isBold: Bool, textColor: UIColor) {

@@ -132,6 +132,54 @@ struct MyEditorScreen: View {
 }
 ```
 
+### Controlling which form fields are highlighted
+
+By default, the editor highlights every interactive form field with a blue overlay to show the user what can be edited. Fields are automatically skipped if either of the following PDF flags are detected:
+
+- **`/Ff` bit 0 — ReadOnly**: the standard PDF field flag that marks a field as non-editable.
+- **`/F` bit 8 — Annotation Locked**: used by some PDF authoring tools to prevent a field from being repositioned or modified. PDFs built with this flag on a field typically intend that field to be filled programmatically rather than by the user.
+
+No configuration is needed for either of these cases — the SDK detects them automatically.
+
+#### Custom highlight logic
+
+If your PDF uses a different convention, pass a `shouldHighlightFormField` closure to take full control. The closure receives a `PDFFormFieldInfo` value for each form field and returns `true` to show the highlight or `false` to hide it.
+
+```swift
+PDFEditorView(
+    url: documentURL,
+    shouldHighlightFormField: { field in
+        // Suppress the highlight for any field explicitly flagged read-only or locked.
+        if field.isReadOnly || field.isAnnotationLocked { return false }
+        return true
+    }
+)
+```
+
+You can also target specific fields by name if your app knows which fields should not be user-editable:
+
+```swift
+// Internal field names come from the /T key in the PDF's AcroForm dictionary.
+// You can inspect them with a tool like PDF Squeezer or by reading the PDF spec's /AcroForm tree.
+let readOnlyFields: Set<String> = ["InvoiceNumber", "ContractDate", "ClientID"]
+
+PDFEditorView(
+    url: documentURL,
+    shouldHighlightFormField: { field in
+        guard let name = field.fieldName else { return true }
+        return !readOnlyFields.contains(name)
+    }
+)
+```
+
+#### `PDFFormFieldInfo` reference
+
+| Property | Type | Description |
+|---|---|---|
+| `fieldName` | `String?` | The field's internal name (`/T` key). May be `nil` for unnamed annotations. |
+| `isReadOnly` | `Bool` | `true` when `/Ff` bit 0 is set — standard PDF read-only flag. |
+| `isAnnotationLocked` | `Bool` | `true` when `/F` bit 8 is set — annotation locked flag used by some authoring tools. |
+
 ---
 
 ## Image Editor
