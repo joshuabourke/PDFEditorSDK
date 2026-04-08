@@ -39,13 +39,18 @@ To make that work for other developers, the repository needs:
 
 ```
 Sources/PDFEditorSDK/
-├── PDFEditorSDK.swift          — public entry points (PDFEditorView, ImageEditorView)
+├── PDFEditorSDK.swift                    — public entry points (PDFEditorView, ImageEditorView)
 ├── Editor/
-│   └── PDFEditorView.swift     — PDF editing pipeline
+│   ├── PDFEditorView.swift               — SwiftUI shell and toolbar
+│   ├── PDFFormViewModel.swift            — editing state, undo/redo, save/export logic
+│   ├── DrawingPDFView.swift              — UIKit PDF canvas with gesture handling
+│   ├── EditorModels.swift                — shared enums and data types
+│   ├── OverlayViews.swift                — TextBoxView, ImageBoxView, ShapeBoxView
+│   └── PencilKitOverlayManager.swift     — standalone PencilKit canvas integration
 ├── ImageEditor/
-│   └── ImageEditorView.swift   — image editing pipeline
+│   └── ImageEditorView.swift             — image editing pipeline
 └── Support/
-    └── Styling/                — shared view modifiers
+    └── Styling/                          — shared view modifiers
 ```
 
 ---
@@ -55,12 +60,16 @@ Sources/PDFEditorSDK/
 ### What it does
 
 - Opens an existing PDF from a `URL`
-- Supports form filling, text highlights, freehand drawing (pencil + finger), text overlays, image overlays, and blank page insertion
+- Supports form filling, text highlights, freehand drawing (pencil + finger), text overlays, image overlays, shape overlays, and page management
+- **Apple PencilKit** integration — native brush effects (watercolor, crayon, marker, pencil) via a dedicated PencilKit mode that captures drawings as image overlays
+- **2-finger navigation** — scroll and pinch-to-zoom with two fingers in every annotation mode (draw, shape, text, select, and PencilKit), keeping single-finger gestures reserved for drawing
+- **Page management** — add blank pages or remove the current page, both with full undo/redo support
+- **Image borders** — configurable border width (none / thin / medium / thick) and border colour on image overlays, burned into the export
 - Saves an editable PDF locally by embedding overlay metadata back into the document
 - Exports a flattened PDF (annotations burned in) for sharing off-device
 - Preserves PDF document metadata (title, author, keywords, etc.) during export
 - Full undo / redo (up to 50 steps)
-- Apple Pencil and Scribble support
+- Apple Pencil, Scribble, and checkbox-toggle-with-pencil support
 
 ### Basic usage
 
@@ -132,6 +141,20 @@ struct MyEditorScreen: View {
 }
 ```
 
+### Toolbar overview
+
+| Section | Controls |
+|---|---|
+| **Form** | Fill in interactive PDF form fields (text, checkboxes, radio buttons, dropdowns). Works with both finger and Apple Pencil. |
+| **Draw** | Freehand ink drawing. Sub-tools: line weight (Fine / Medium / Thick — default Medium), colour picker, eraser toggle, eraser size. Use 2 fingers to scroll while drawing. |
+| **Text** | Single-finger tap to create a text box (drag to set size). Tap an existing box to edit it; tap anywhere else to dismiss the keyboard. Sub-tools: text colour, background colour (including white), font size, bold. |
+| **Shape** | Draw circles, rectangles, or triangles as vector overlay shapes. Sub-tools: shape picker, stroke colour, line weight. Use 2 fingers to scroll while placing shapes. |
+| **Select** | Tap any overlay (text box, image, shape) to select it. Drag to move, drag the orange handle to resize, tap **Delete** to remove. When an image overlay is selected, configure its border width and colour from the toolbar. |
+| **Pencil** | Native Apple PencilKit canvas — draw with watercolour, crayon, marker, fountain pen, and more. Tap **Done** to commit the drawing as an image overlay. Use 2 fingers to scroll the page while drawing. |
+| **Pages** | **Add** inserts a blank page after the current page. **Remove** deletes the current page (requires confirmation; disabled on single-page documents). Both actions are fully undoable. |
+
+---
+
 ### Controlling which form fields are highlighted
 
 By default, the editor highlights every interactive form field with a blue overlay to show the user what can be edited. Fields are automatically skipped if either of the following PDF flags are detected:
@@ -188,8 +211,9 @@ PDFEditorView(
 
 - Accepts any `UIImage` (or raw `Data`) as the canvas background
 - Freehand drawing with Apple Pencil or finger — adjustable colour, line weight, and eraser
-- Drag-to-create text boxes with configurable font size, bold, text colour, and background colour
+- Drag-to-create text boxes with configurable font size, bold, text colour, and background colour (including white)
 - Overlay cropped images from Camera or Photo Library — tap **Image** to pick, use the built-in system crop tool, then drag and pinch-resize the result on the canvas
+- **Configurable image borders** — choose border width (none / thin / medium / thick) and border colour for any image overlay, burned into the export
 - All drawing and overlays are constrained to the image content area — no annotations outside the image
 - Select tool to move, resize, or delete any text box or image overlay
 - Full undo / redo (up to 50 steps)
@@ -264,7 +288,27 @@ ImageEditorView(imageData: imageData) { exportedImage in
 
 | Section | Controls |
 |---|---|
-| **Draw** | Activate freehand drawing. Sub-tools: line weight (Fine / Medium / Thick), colour picker, eraser toggle, eraser size |
-| **Text** | Drag on the image to draw a text box. Sub-tools: text colour, background colour, font size, bold |
-| **Select** | Tap any text box or image overlay to select it. Drag to move, drag the orange handle to resize, tap **Delete** in the toolbar to remove |
-| **Image** | Add a photo from Camera or Photo Library with built-in crop. After placing, switch to Select to reposition or resize |
+| **Draw** | Activate freehand drawing. Sub-tools: line weight (Fine / Medium / Thick — default Medium), colour picker, eraser toggle, eraser size |
+| **Text** | Drag on the image to draw a text box. Sub-tools: text colour, background colour (including white), font size, bold |
+| **Select** | Tap any text box or image overlay to select it. Drag to move, drag the orange handle to resize, tap **Delete** in the toolbar to remove. When an image is selected, configure its border width and colour from the toolbar. |
+| **Image** | Add a photo from Camera or Photo Library with built-in crop. After placing, switch to Select to reposition, resize, or add a border |
+
+---
+
+## Changelog
+
+### Recent improvements
+
+- **Apple PencilKit mode** (PDF Editor) — a new **Pencil** tool overlays a native `PKCanvasView` on the current PDF page, giving access to PencilKit's full brush library (watercolour, crayon, marker, fountain pen, and more). Tapping **Done** commits the drawing as a transparent PNG image overlay, fully integrated with undo/redo and flattened export. 2-finger scrolling works while PencilKit is active.
+
+- **2-finger navigation in all annotation modes** — scrolling and pinch-to-zoom with two fingers now works consistently whether you are drawing, placing shapes, editing text boxes, or in PencilKit mode. Single-finger gestures are reserved for annotation so the two actions never conflict.
+
+- **Page management** (PDF Editor) — the toolbar now includes **Add** (inserts a blank page after the current one) and **Remove** (deletes the current page with a confirmation alert). Both actions are reversible via undo/redo. Remove is disabled and greyed out on single-page documents.
+
+- **Image borders** — image overlays in both the PDF and Image editors now support a configurable border. Select an image overlay to access border-width (none / thin / medium / thick) and border-colour controls in the toolbar. The border is burned into the flattened export.
+
+- **White background for text boxes** — the background-colour menu for text boxes now includes a **White** option, useful when placing text over dark content.
+
+- **Text mode tap behaviour** — in Text mode, tapping an existing text box immediately opens it for editing. Tapping anywhere outside a text box closes the keyboard and deselects the current box, ready for you to draw a new one.
+
+- **Default pen weight aligned** — the default ink line weight is now **Medium (3 pt)**, matching the visible Medium option in the weight picker.

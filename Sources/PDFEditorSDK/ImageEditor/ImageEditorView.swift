@@ -7,31 +7,37 @@
 
 import SwiftUI
 import UIKit
+import PencilKit
 
 // MARK: - Public Entry Point
 
 public struct ImageEditorView: View {
     @State private var viewModel: ImageEditorViewModel
+    let showsDismissButton: Bool
 
     public init(
         image: UIImage,
+        showsDismissButton: Bool = false,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
         _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
+        self.showsDismissButton = showsDismissButton
     }
 
     public init(
         imageData: Data,
+        showsDismissButton: Bool = false,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
         let image = UIImage(data: imageData) ?? UIImage()
         _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
+        self.showsDismissButton = showsDismissButton
     }
 
     public var body: some View {
-        ImageFormEditorView(viewModel: viewModel)
+        ImageFormEditorView(viewModel: viewModel, showsDismissButton: showsDismissButton)
     }
 }
 
@@ -39,12 +45,15 @@ public struct ImageEditorView: View {
 
 struct ImageFormEditorView: View {
     @Bindable var viewModel: ImageEditorViewModel
+    var showsDismissButton = false
+    @Environment(\.dismiss) private var dismiss
     private let toolbarChipSize = CGSize(width: 56, height: 50)
     @State private var isShowingImagePicker = false
     @State private var imagePickerSource: ImagePickerSource = .photoLibrary
     @State private var isShowingSaveAlert = false
     @State private var isShowingShareSheet = false
     @State private var exportedImage: UIImage?
+    @State private var changesNotSaved = false
 
     var body: some View {
         VStack {
@@ -57,9 +66,23 @@ struct ImageFormEditorView: View {
         }
         .padding()
         .backgroundModifier()
+        .ignoresSafeArea(.keyboard)
         .navigationTitle("Image Editor")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if showsDismissButton {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        if !viewModel.undoStack.isEmpty {
+                            changesNotSaved.toggle()
+                        } else {
+                            dismiss()
+                        }
+                    } label: {
+                        Text("Close")
+                    }
+                }
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
                     viewModel.undo()
@@ -79,7 +102,7 @@ struct ImageFormEditorView: View {
                     viewModel.saveImage()
                     isShowingSaveAlert = true
                 } label: {
-                    Image(systemName: "square.and.arrow.down")
+                    Label("Save", systemImage: "square.and.arrow.down")
                 }
 
                 Button {
@@ -88,7 +111,7 @@ struct ImageFormEditorView: View {
                         isShowingShareSheet = true
                     }
                 } label: {
-                    Image(systemName: "square.and.arrow.up")
+                    Label("Export", systemImage: "square.and.arrow.up")
                 }
             }
         }
@@ -140,6 +163,20 @@ struct ImageFormEditorView: View {
         }
         .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
         .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
+        .onChange(of: viewModel.imageBorderWidth) { _, _ in viewModel.applyImageBorderToSelected() }
+        .onChange(of: viewModel.imageBorderColor) { _, _ in viewModel.applyImageBorderToSelected() }
+        .alert("Unsaved Changes", isPresented: $changesNotSaved) {
+            Button("Save Changes") {
+                viewModel.saveImage()
+                dismiss()
+            }
+            Button("Discard & Close", role: .destructive) {
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("You have unsaved changes. Would you like to save before closing?")
+        }
     }
 
     // MARK: - Toolbar
@@ -290,6 +327,7 @@ struct ImageFormEditorView: View {
                                     }
 
                                     Menu {
+                                        Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
                                         Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
                                         Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
                                         Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
@@ -378,6 +416,32 @@ struct ImageFormEditorView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                    }
+
+                    toolbarDivider
+
+                    // MARK: PencilKit Section
+                    VStack(spacing: 6) {
+                        Text("Pencil")
+                            .font(.caption2)
+                            .tracking(0.5)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            viewModel.setTool(.pencilKit)
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "pencil.and.outline")
+                                    .symbolVariant(viewModel.activeTool == .pencilKit ? .fill : .none)
+                                    .fontWeight(.semibold)
+                                Text("Pencil")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundStyle(Color.accentColor)
+                            .padding(6)
+                            .background(viewModel.activeTool == .pencilKit ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
                     }
 
                 }//: HSTACK
@@ -531,6 +595,10 @@ struct ImageFormEditorView: View {
                     imageSelectShapeSubtools
                 }
 
+                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .image {
+                    imageSelectImageSubtools
+                }
+
                 if viewModel.hasSelectedOverlayObject {
                     Button {
                         viewModel.deleteSelectedObject()
@@ -570,6 +638,7 @@ struct ImageFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
             Menu {
+                Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
                 Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
                 Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
                 Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
@@ -629,6 +698,35 @@ struct ImageFormEditorView: View {
             }
         }
     }
+
+    @ViewBuilder private var imageSelectImageSubtools: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Menu {
+                Button("None") { viewModel.imageBorderWidth = 0 }
+                Button("Thin (1pt)") { viewModel.imageBorderWidth = 1 }
+                Button("Medium (2pt)") { viewModel.imageBorderWidth = 2 }
+                Button("Thick (4pt)") { viewModel.imageBorderWidth = 4 }
+                Button("Heavy (6pt)") { viewModel.imageBorderWidth = 6 }
+            } label: {
+                toolbarChip {
+                    Image(systemName: "square.dashed").fontWeight(.semibold)
+                    Text(viewModel.imageBorderWidth == 0 ? "No Border" : "\(Int(viewModel.imageBorderWidth))pt")
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(4)
+                .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
+            }
+            if viewModel.imageBorderWidth > 0 {
+                ColorPicker("", selection: Binding(
+                    get: { Color(viewModel.imageBorderColor) },
+                    set: { viewModel.imageBorderColor = UIColor($0) }
+                ))
+                .labelsHidden()
+                .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            }
+        }
+    }
 }
 
 // MARK: - Drawing Image View Representable
@@ -636,15 +734,48 @@ struct ImageFormEditorView: View {
 struct DrawingImageViewRepresentable: UIViewRepresentable {
     @Bindable var viewModel: ImageEditorViewModel
 
-    func makeUIView(context: Context) -> DrawingImageView {
-        let view = DrawingImageView()
-        view.viewModel = viewModel
-        viewModel.canvasView = view
-        view.setSourceImage(viewModel.sourceImage)
-        return view
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
     }
 
-    func updateUIView(_ view: DrawingImageView, context: Context) {
+    func makeUIView(context: Context) -> UIScrollView {
+        let scrollView = UIScrollView()
+        scrollView.minimumZoomScale = 1.0
+        scrollView.maximumZoomScale = 5.0
+        scrollView.bouncesZoom = true
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.delegate = context.coordinator
+
+        let drawingView = DrawingImageView()
+        drawingView.viewModel = viewModel
+        viewModel.canvasView = drawingView
+        drawingView.setSourceImage(viewModel.sourceImage)
+        drawingView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(drawingView)
+
+        NSLayoutConstraint.activate([
+            drawingView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            drawingView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            drawingView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            drawingView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            drawingView.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor),
+            drawingView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+        ])
+
+        context.coordinator.drawingView = drawingView
+        context.coordinator.scrollView = scrollView
+
+        // In select mode allow 1-finger scrolling; otherwise require 2 fingers
+        // so that 1-finger input is reserved for drawing / tool gestures.
+        updateScrollGestureRequirements(scrollView, isSelectMode: viewModel.isSelectMode)
+
+        return scrollView
+    }
+
+    func updateUIView(_ scrollView: UIScrollView, context: Context) {
+        guard let view = context.coordinator.drawingView else { return }
+
         view.isDrawingMode = viewModel.isDrawingMode
         view.isTextMode = viewModel.isTextMode
         view.isSelectMode = viewModel.isSelectMode
@@ -660,6 +791,30 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         view.currentShapeKind = viewModel.activeShapeKind
         view.shapeStrokeColor = viewModel.shapeStrokeColor
         view.shapeLineWidth = viewModel.shapeLineWidth
+        view.isPencilKitMode = viewModel.activeTool == .pencilKit
+        view.currentImageBorderWidth = viewModel.imageBorderWidth
+        view.currentImageBorderColor = viewModel.imageBorderColor
+
+        updateScrollGestureRequirements(scrollView, isSelectMode: viewModel.isSelectMode)
+    }
+
+    /// In select mode the user can scroll with 1 finger. In every other tool mode
+    /// scrolling requires 2 fingers so that single-finger input is reserved for
+    /// drawing, erasing, shape creation, etc.
+    private func updateScrollGestureRequirements(_ scrollView: UIScrollView, isSelectMode: Bool) {
+        scrollView.panGestureRecognizer.minimumNumberOfTouches = isSelectMode ? 1 : 2
+        scrollView.panGestureRecognizer.maximumNumberOfTouches = 2
+    }
+
+    // MARK: - Coordinator
+
+    class Coordinator: NSObject, UIScrollViewDelegate {
+        weak var drawingView: DrawingImageView?
+        weak var scrollView: UIScrollView?
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            drawingView
+        }
     }
 }
 
@@ -691,12 +846,15 @@ class ImageEditorViewModel {
     var activeShapeKind: OverlayShapeKind = .rectangle
     var shapeStrokeColor: UIColor = .systemRed
     var shapeLineWidth: CGFloat = 2.0
+    var imageBorderWidth: CGFloat = 0
+    var imageBorderColor: UIColor = .black
     var selectedOverlayKind: SelectedOverlayKind?
 
     var isDrawingMode: Bool { activeTool == .draw }
     var isTextMode: Bool { activeTool == .text }
     var isSelectMode: Bool { activeTool == .select }
     var isShapeMode: Bool { activeTool == .shape }
+    var isPencilKitMode: Bool { activeTool == .pencilKit }
     var canUndo: Bool { !undoStack.isEmpty }
     var canRedo: Bool { !redoStack.isEmpty }
 
@@ -707,6 +865,13 @@ class ImageEditorViewModel {
     }
 
     func setTool(_ tool: EditorTool) {
+        // Tapping an already-active tool returns to select mode
+        if activeTool == tool, tool != .select {
+            activeTool = .select
+            canvasView?.endTextEditing()
+            isEraserMode = false
+            return
+        }
         if tool == .shape {
             activeTool = .shape
             canvasView?.endTextEditing()
@@ -714,9 +879,10 @@ class ImageEditorViewModel {
             isEraserMode = false
             return
         }
-        if activeTool == tool, tool != .select {
-            activeTool = .select
+        if tool == .pencilKit {
+            activeTool = .pencilKit
             canvasView?.endTextEditing()
+            canvasView?.deselectAll()
             isEraserMode = false
             return
         }
@@ -734,6 +900,10 @@ class ImageEditorViewModel {
 
     func applyShapeStyleToSelected() {
         canvasView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
+    }
+
+    func applyImageBorderToSelected() {
+        canvasView?.applyImageBorderToSelected(borderWidth: imageBorderWidth, borderColor: imageBorderColor)
     }
 
     func addOverlayImage(_ image: UIImage) {
@@ -1007,8 +1177,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     var isDrawingMode = false {
         didSet {
             pencilGesture?.isEnabled = isDrawingMode
-            fingerPanGesture?.isEnabled = isDrawingMode
-            fingerPinchGesture?.isEnabled = isDrawingMode
+            // Pan and pinch navigation is now handled by the parent UIScrollView.
+            // The no-op finger gestures are no longer enabled here.
             if !isDrawingMode {
                 hideEraserCircle()
             }
@@ -1071,9 +1241,25 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         }
     }
 
+    var currentImageBorderWidth: CGFloat = 0
+    var currentImageBorderColor: UIColor = .black
+
+    // MARK: - PencilKit
+    private var pkCanvasView: PKCanvasView?
+    private var pkToolPicker: PKToolPicker?
+    private var pkDoneButton: UIButton?
+    var isPencilKitMode = false {
+        didSet {
+            guard oldValue != isPencilKitMode else { return }
+            if isPencilKitMode {
+                activatePencilKit()
+            } else {
+                deactivatePencilKit()
+            }
+        }
+    }
+
     private var pencilGesture: PencilDrawingGestureRecognizer?
-    private var fingerPanGesture: UIPanGestureRecognizer?
-    private var fingerPinchGesture: UIPinchGestureRecognizer?
     private var textBoxPanGesture: UIPanGestureRecognizer?
     private var textBoxStartPoint: CGPoint?
     private var selectTapGesture: UITapGestureRecognizer?
@@ -1189,23 +1375,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         addGestureRecognizer(pencil)
         pencilGesture = pencil
 
-        // Finger 2-touch pan (no-op scroll pass-through)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleFingerPan(_:)))
-        pan.minimumNumberOfTouches = 2
-        pan.maximumNumberOfTouches = 2
-        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        pan.delegate = self
-        pan.isEnabled = false
-        addGestureRecognizer(pan)
-        fingerPanGesture = pan
-
-        // Finger pinch (no-op)
-        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handleFingerPinch(_:)))
-        pinch.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
-        pinch.delegate = self
-        pinch.isEnabled = false
-        addGestureRecognizer(pinch)
-        fingerPinchGesture = pinch
+        // Pan and pinch for navigation are handled by the parent UIScrollView.
 
         // Text box pan gesture
         let textPan = UIPanGestureRecognizer(target: self, action: #selector(handleTextBoxPan(_:)))
@@ -1267,17 +1437,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     func setSourceImage(_ image: UIImage) {
         imageView.image = image
-    }
-
-    // MARK: - Finger Gesture Handlers (no-op)
-
-    @objc private func handleFingerPan(_ gesture: UIPanGestureRecognizer) {
-        // no-op: finger pan is enabled to allow 2-finger scroll pass-through but
-        // the image editor view is not scrollable; gesture is consumed silently.
-    }
-
-    @objc private func handleFingerPinch(_ gesture: UIPinchGestureRecognizer) {
-        // no-op
     }
 
     // MARK: - PencilDrawingGestureDelegate
@@ -1704,6 +1863,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func addImageBox(from state: OverlayImageState) {
         let box = ImageBoxView(id: state.id, imageData: state.imageData)
         box.frame = state.frame
+        box.updateBorder(width: state.borderWidth, color: state.borderColor)
         box.setSelectMode(isSelectMode)
         box.onSelect = { [weak self] id in
             self?.selectImageBox(id: id)
@@ -1729,13 +1889,24 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     func imageBoxState(id: UUID) -> OverlayImageState? {
         guard let box = imageBoxViews[id] else { return nil }
-        return OverlayImageState(id: id, frame: box.frame, imageData: box.imageData)
+        return OverlayImageState(id: id, frame: box.frame, imageData: box.imageData, borderWidth: box.imageBorderWidth, borderColor: box.imageBorderColor)
     }
 
     func updateImageBox(from state: OverlayImageState) {
         guard let box = imageBoxViews[state.id] else { return }
         box.frame = state.frame
         box.setImageData(state.imageData)
+        box.updateBorder(width: state.borderWidth, color: state.borderColor)
+    }
+
+    func applyImageBorderToSelected(borderWidth: CGFloat, borderColor: UIColor) {
+        guard let id = selectedImageBoxID, let box = imageBoxViews[id] else { return }
+        let before = OverlayImageState(id: id, frame: box.frame, imageData: box.imageData, borderWidth: box.imageBorderWidth, borderColor: box.imageBorderColor)
+        box.updateBorder(width: borderWidth, color: borderColor)
+        let after = OverlayImageState(id: id, frame: box.frame, imageData: box.imageData, borderWidth: borderWidth, borderColor: borderColor)
+        if before.borderWidth != after.borderWidth || before.borderColor != after.borderColor {
+            viewModel?.didMakeChange(.imageBoxUpdate(before: before, after: after))
+        }
     }
 
     // MARK: - Selection
@@ -1909,6 +2080,93 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }
+
+    // MARK: - PencilKit
+
+    private func activatePencilKit() {
+        let canvas = PKCanvasView()
+        canvas.backgroundColor = .clear
+        canvas.isOpaque = false
+        canvas.drawingPolicy = .anyInput
+        canvas.overrideUserInterfaceStyle = .light
+        canvas.frame = imageContentRect
+        addSubview(canvas)
+
+        let picker = PKToolPicker()
+        picker.setVisible(true, forFirstResponder: canvas)
+        picker.addObserver(canvas)
+        canvas.becomeFirstResponder()
+
+        pkCanvasView = canvas
+        pkToolPicker = picker
+
+        // MARK: Done button
+        let btn = UIButton(type: .system)
+        btn.setTitle("Done", for: .normal)
+        btn.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+        btn.setTitleColor(.white, for: .normal)
+        btn.backgroundColor = .systemBlue
+        btn.layer.cornerRadius = 10
+        btn.layer.shadowColor = UIColor.black.cgColor
+        btn.layer.shadowOpacity = 0.18
+        btn.layer.shadowOffset = CGSize(width: 0, height: 2)
+        btn.layer.shadowRadius = 4
+        btn.contentEdgeInsets = UIEdgeInsets(top: 8, left: 18, bottom: 8, right: 18)
+        btn.addTarget(self, action: #selector(handlePencilKitDoneTapped), for: .touchUpInside)
+        btn.sizeToFit()
+
+        let btnSize = btn.bounds.size
+        let padding: CGFloat = 16
+        btn.frame = CGRect(
+            x: bounds.maxX - btnSize.width - padding,
+            y: bounds.minY + padding,
+            width: btnSize.width,
+            height: btnSize.height
+        )
+        btn.autoresizingMask = [.flexibleLeftMargin, .flexibleBottomMargin]
+        addSubview(btn)
+        bringSubviewToFront(btn)
+        pkDoneButton = btn
+    }
+
+    @objc private func handlePencilKitDoneTapped() {
+        viewModel?.setTool(.select)
+    }
+
+    private func deactivatePencilKit() {
+        guard let canvas = pkCanvasView else { return }
+        let drawing = canvas.drawing
+        if !drawing.bounds.isEmpty {
+            // Crop to the actual drawn area (stroke bounds) within the canvas
+            let strokeBounds = drawing.bounds
+            let scale = UIScreen.main.scale
+            let image = drawing.image(from: strokeBounds, scale: scale)
+
+            // PNG preserves the transparent background — JPEG would turn it opaque
+            if let data = image.pngData() {
+                // Map stroke bounds from canvas-local space into this view's space
+                let frameInView = CGRect(
+                    x: canvas.frame.origin.x + strokeBounds.origin.x,
+                    y: canvas.frame.origin.y + strokeBounds.origin.y,
+                    width: strokeBounds.width,
+                    height: strokeBounds.height
+                )
+                let state = OverlayImageState(id: UUID(), frame: frameInView, imageData: data)
+                addImageBox(from: state)
+                viewModel?.didMakeChange(.imageBox(add: state, remove: nil))
+            }
+        }
+        pkToolPicker?.setVisible(false, forFirstResponder: canvas)
+        pkToolPicker?.removeObserver(canvas)
+        canvas.resignFirstResponder()
+        canvas.removeFromSuperview()
+        pkCanvasView = nil
+        pkToolPicker = nil
+
+        // Remove the Done button
+        pkDoneButton?.removeFromSuperview()
+        pkDoneButton = nil
+    }
 }
 
 // MARK: - UIGestureRecognizerDelegate
@@ -1918,7 +2176,7 @@ extension DrawingImageView: UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        let drawGestures: [UIGestureRecognizer?] = [pencilGesture, fingerPanGesture, fingerPinchGesture]
+        let drawGestures: [UIGestureRecognizer?] = [pencilGesture]
         let isFirst = drawGestures.contains(where: { $0 === gestureRecognizer })
         let isSecond = drawGestures.contains(where: { $0 === otherGestureRecognizer })
         if isFirst && isSecond { return true }
