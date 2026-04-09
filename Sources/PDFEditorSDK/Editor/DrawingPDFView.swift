@@ -20,33 +20,49 @@ protocol PencilDrawingGestureDelegate: AnyObject {
 
 class PencilDrawingGestureRecognizer: UIGestureRecognizer {
     weak var drawingDelegate: PencilDrawingGestureDelegate?
-    
+
+    /// When `true`, single-finger touches are also accepted for drawing in
+    /// addition to Apple Pencil. Updating this property also updates
+    /// `allowedTouchTypes` so UIKit routes the right events.
+    var includesFingerInput: Bool = false {
+        didSet {
+            allowedTouchTypes = includesFingerInput
+                ? [NSNumber(value: UITouch.TouchType.pencil.rawValue),
+                   NSNumber(value: UITouch.TouchType.direct.rawValue)]
+                : [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        }
+    }
+
     override init(target: Any?, action: Selector?) {
         super.init(target: target, action: action)
         allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
     }
-    
+
+    private func isValidTouch(_ touch: UITouch) -> Bool {
+        touch.type == .pencil || (includesFingerInput && touch.type == .direct)
+    }
+
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard let touch = touches.first, touch.type == .pencil else {
+        guard let touch = touches.first, isValidTouch(touch) else {
             for touch in touches { ignore(touch, for: event) }
             return
         }
         state = .began
         drawingDelegate?.pencilTouchBegan(touch, with: event)
     }
-    
+
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard let touch = touches.first, touch.type == .pencil else { return }
+        guard let touch = touches.first, isValidTouch(touch) else { return }
         state = .changed
         drawingDelegate?.pencilTouchMoved(touch, with: event)
     }
-    
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
-        guard let touch = touches.first, touch.type == .pencil else { return }
+        guard let touch = touches.first, isValidTouch(touch) else { return }
         state = .ended
         drawingDelegate?.pencilTouchEnded(touch, with: event)
     }
-    
+
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         state = .cancelled
         drawingDelegate?.pencilTouchCancelled(with: event)
@@ -67,15 +83,15 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 enableTextSelection()
             }
             syncScribbleInteraction()
-            
+
             if !isDrawingMode {
                 hideEraserCircle()
             } else {
                 deselectInkAnnotation()
             }
-            pencilDrawingGesture?.isEnabled = isDrawingMode
-            fingerPanGesture?.isEnabled = isAnnotationToolActive
-            fingerPinchGesture?.isEnabled = isAnnotationToolActive
+            // Pencil gesture must also stay active when the standalone erase tool is on.
+            pencilDrawingGesture?.isEnabled = isDrawingMode || isEraserMode
+            updateNavigationGestureState()
         }
     }
 
@@ -95,8 +111,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             } else {
                 textBoxLayer.isHidden = true
             }
-            fingerPanGesture?.isEnabled = isAnnotationToolActive
-            fingerPinchGesture?.isEnabled = isAnnotationToolActive
+            updateNavigationGestureState()
+            updatePencilTextTapGesture()
         }
     }
 
@@ -113,8 +129,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 deselectOverlaySelection()
             }
             syncScribbleInteraction()
-            fingerPanGesture?.isEnabled = isAnnotationToolActive
-            fingerPinchGesture?.isEnabled = isAnnotationToolActive
+            updateNavigationGestureState()
         }
     }
     
@@ -122,15 +137,20 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     /// True when any annotation tool is active and needs touch isolation + 2-finger navigation.
     private var isAnnotationToolActive: Bool {
-        isDrawingMode || isShapeMode || isTextMode || isSelectMode || isPencilKitMode
+        isDrawingMode || isEraserMode || isShapeMode || isTextMode || isSelectMode || isPencilKitMode
     }
 
     /// True when touches to PDFKit's internals should be fully suppressed.
     /// Select mode excluded so overlay subviews (ImageBoxView, ShapeBoxView)
     /// receive taps for drag-to-relocate. Text mode now included so single-finger
     /// drags always draw a new text box instead of scrolling the page.
+    ///
+    /// In pencil-only mode we never intercept — instead we restrict PDFKit's
+    /// scroll view pan to finger-only touches so our pencil annotation gestures
+    /// win for pencil input while finger input reaches PDFKit naturally.
     private var shouldInterceptAllTouches: Bool {
-        isDrawingMode || isShapeMode || isTextMode
+        if pencilOnlyAnnotations { return false }
+        return isDrawingMode || isEraserMode || isShapeMode || isTextMode
     }
 
     var isFormMode = false {
@@ -162,7 +182,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         // Only touch PDFKit's built-in gesture recognisers — skip the ones we own
         // and manage explicitly through mode properties (inkSelectTapGesture, etc.).
         gestureRecognizers?.forEach { gesture in
-            guard gesture !== inkSelectTapGesture else { return }
+            guard gesture !== inkSelectTapGesture,
+                  gesture !== pencilTextTapGesture,
+                  gesture !== formPencilTapGesture else { return }
             if let longPress = gesture as? UILongPressGestureRecognizer {
                 longPress.isEnabled = false
             }
@@ -179,7 +201,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         // Only touch PDFKit's built-in gesture recognisers — skip the ones we own
         // and manage explicitly through mode properties (inkSelectTapGesture, etc.).
         gestureRecognizers?.forEach { gesture in
-            guard gesture !== inkSelectTapGesture else { return }
+            guard gesture !== inkSelectTapGesture,
+                  gesture !== pencilTextTapGesture,
+                  gesture !== formPencilTapGesture else { return }
             if let longPress = gesture as? UILongPressGestureRecognizer {
                 longPress.isEnabled = true
             }
@@ -211,7 +235,16 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     
     var currentInkColor: UIColor = .systemBlue
     var currentLineWidth: CGFloat = 3.0
-    var isEraserMode: Bool = false
+    var isEraserMode: Bool = false {
+        didSet {
+            // Eraser is now a standalone tool. When it becomes active enable the pencil
+            // gesture (same gesture that handles drawing); when it's deactivated only keep
+            // the gesture if draw mode is still on, and hide the eraser circle.
+            pencilDrawingGesture?.isEnabled = isDrawingMode || isEraserMode
+            if !isEraserMode { hideEraserCircle() }
+            updateNavigationGestureState()
+        }
+    }
     var eraserRadius: CGFloat = 9 {
         didSet { updateEraserCircle() }
     }
@@ -219,8 +252,67 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     var textBoxFontSize: CGFloat = 14
     var textBoxIsBold: Bool = false
     var textBoxTextColor: UIColor = .label
+
+    /// When `true`, only Apple Pencil triggers annotations. Finger touches are
+    /// passed through to PDFKit so the user can pan and zoom normally with one finger.
+    var pencilOnlyAnnotations: Bool = false {
+        didSet {
+            updateNavigationGestureState()
+            updateAnnotationGestureTouchTypes()
+        }
+    }
+
+    /// When `true`, single-finger touch input is also accepted for drawing in
+    /// addition to Apple Pencil. Two-finger gestures continue to navigate.
+    var drawWithFinger: Bool = false {
+        didSet { pencilDrawingGesture?.includesFingerInput = drawWithFinger }
+    }
+
+    /// Re-evaluates whether the two-finger navigation gestures should be active
+    /// and whether PDFKit's internal scroll pan should be restricted to finger-only.
+    /// Called whenever a tool mode or an input-mode setting changes.
+    private func updateNavigationGestureState() {
+        let enabled = isAnnotationToolActive && !pencilOnlyAnnotations
+        fingerPanGesture?.isEnabled = enabled
+        fingerPinchGesture?.isEnabled = enabled
+        updateScrollPanAllowedTouchTypes()
+    }
+
+    /// When pencil-only mode is active and an annotation tool is in use, restrict
+    /// PDFKit's internal scroll pan to finger-only. This guarantees that pencil
+    /// drags are exclusively claimed by the annotation gesture recognisers
+    /// (shapePanGesture, textBoxPanGesture, pencilDrawingGesture) and never race
+    /// against PDFKit's scroll recogniser for the same pencil touch.
+    private func updateScrollPanAllowedTouchTypes() {
+        guard let sv = scrollView else { return }
+        let restrictToFinger = pencilOnlyAnnotations && (isDrawingMode || isEraserMode || isShapeMode || isTextMode)
+        sv.panGestureRecognizer.allowedTouchTypes = restrictToFinger
+            ? [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            : [NSNumber(value: UITouch.TouchType.direct.rawValue),
+               NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+    }
+
+    /// Restricts shape and text-box creation gestures to Apple Pencil only when
+    /// `pencilOnlyAnnotations` is on, or restores them to accept finger input again.
+    private func updateAnnotationGestureTouchTypes() {
+        let types: [NSNumber] = pencilOnlyAnnotations
+            ? [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+            : [NSNumber(value: UITouch.TouchType.direct.rawValue),
+               NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        shapePanGesture?.allowedTouchTypes = types
+        textBoxPanGesture?.allowedTouchTypes = types
+        updatePencilTextTapGesture()
+    }
+
+    /// Enables the pencil-only tap gesture used for tap-to-edit in text mode when
+    /// pencil-only annotations are active. In that configuration `shouldInterceptAllTouches`
+    /// returns false, so the normal touch-override tap tracker is bypassed.
+    private func updatePencilTextTapGesture() {
+        pencilTextTapGesture?.isEnabled = isTextMode && pencilOnlyAnnotations
+    }
     
     private var pencilDrawingGesture: PencilDrawingGestureRecognizer?
+    private var pencilTextTapGesture: UITapGestureRecognizer?
     private var fingerPanGesture: UIPanGestureRecognizer?
     private var fingerPinchGesture: UIPinchGestureRecognizer?
     private var inkDragPanGesture: UIPanGestureRecognizer?
@@ -261,8 +353,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             shapePanGesture?.isEnabled = isShapeMode
             if !isShapeMode { shapePreviewLayer.isHidden = true }
             syncScribbleInteraction()
-            fingerPanGesture?.isEnabled = isAnnotationToolActive
-            fingerPinchGesture?.isEnabled = isAnnotationToolActive
+            updateNavigationGestureState()
         }
     }
     // MARK: - PencilKit
@@ -396,6 +487,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         setupShapePreviewLayer()
         setupShapePanGesture()
         setupFormPencilTapGesture()
+        setupPencilTextTapGesture()
         setupPencilKitManager()
     }
 
@@ -473,6 +565,22 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 return
             }
         }
+    }
+
+    private func setupPencilTextTapGesture() {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handlePencilTextTap(_:)))
+        tap.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        tap.cancelsTouchesInView = false
+        tap.isEnabled = false
+        tap.delegate = self
+        addGestureRecognizer(tap)
+        pencilTextTapGesture = tap
+    }
+
+    @objc private func handlePencilTextTap(_ gesture: UITapGestureRecognizer) {
+        guard isTextMode, pencilOnlyAnnotations else { return }
+        let point = gesture.location(in: self)
+        handleTextModeTap(at: point)
     }
 
     private func setupPencilDrawingGesture() {
@@ -854,7 +962,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     // MARK: - Pencil Touch Handlers (called by PencilDrawingGestureRecognizer)
     
     func pencilTouchBegan(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode else { return }
+        guard isDrawingMode || isEraserMode else { return }
         let viewPoint = touch.location(in: self)
         guard let page = self.page(for: viewPoint, nearest: true) else { return }
         let pagePoint = self.convert(viewPoint, to: page)
@@ -875,7 +983,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
     
     func pencilTouchMoved(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode,
+        guard isDrawingMode || isEraserMode,
               let page = currentPDFPage else { return }
         
         let coalescedTouches = event?.coalescedTouches(for: touch) ?? [touch]
@@ -895,7 +1003,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
     
     func pencilTouchEnded(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode,
+        guard isDrawingMode || isEraserMode,
               let page = currentPDFPage else { return }
         
         if !isEraserMode {
@@ -1758,7 +1866,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         for annotation in page.annotations {
             guard annotation.type == "Ink" else { continue }
             let lineWidth = annotation.border?.lineWidth ?? currentLineWidth
-            let color = annotation.color ?? .systemBlue
+            let color = annotation.color
             
             guard let paths = annotation.paths, !paths.isEmpty else { continue }
             let pointInAnnotation = CGPoint(
@@ -2207,7 +2315,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if suppressGoTo { return }
         if shouldInterceptAllTouches {
-            // Record the touch start so touchesEnded can detect a tap in text mode.
             if isTextMode, let touch = touches.first {
                 textModeTouchStart = touch.location(in: self)
             }
@@ -2217,20 +2324,23 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if shouldInterceptAllTouches || suppressGoTo { return }
+        if suppressGoTo { return }
+        if shouldInterceptAllTouches { return }
         super.touchesMoved(touches, with: event)
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         if suppressGoTo { return }
         if shouldInterceptAllTouches {
-            // A pan gesture that begins sends touchesCancelled (clearing textModeTouchStart),
-            // so touchesEnded only runs for genuine taps — handle them here.
-            if isTextMode, let touch = touches.first, let start = textModeTouchStart {
-                let end = touch.location(in: self)
-                let distance = hypot(end.x - start.x, end.y - start.y)
-                if distance < 15 {
-                    handleTextModeTap(at: start)
+            if isTextMode, let touch = touches.first {
+                // A pan gesture that begins sends touchesCancelled (clearing textModeTouchStart),
+                // so touchesEnded only runs for genuine taps — handle them here.
+                if let start = textModeTouchStart {
+                    let end = touch.location(in: self)
+                    let distance = hypot(end.x - start.x, end.y - start.y)
+                    if distance < 15 {
+                        handleTextModeTap(at: start)
+                    }
                 }
             }
             textModeTouchStart = nil
@@ -2278,7 +2388,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if gestureRecognizer === inkDragPanGesture || otherGestureRecognizer === inkDragPanGesture {
             return false
         }
-        let drawGestures: [UIGestureRecognizer?] = [pencilDrawingGesture, fingerPanGesture, fingerPinchGesture, shapePanGesture, textBoxPanGesture]
+        let drawGestures: [UIGestureRecognizer?] = [pencilDrawingGesture, pencilTextTapGesture, fingerPanGesture, fingerPinchGesture, shapePanGesture, textBoxPanGesture]
         let isFirst = drawGestures.contains(where: { $0 === gestureRecognizer })
         let isSecond = drawGestures.contains(where: { $0 === otherGestureRecognizer })
         if isFirst && isSecond { return true }
@@ -2291,12 +2401,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             guard isTextMode else { return false }
         }
         if gestureRecognizer === shapePanGesture {
+            // In shape mode the user always intends to draw a new shape — allow the
+            // gesture to begin over any content, including existing overlay objects.
             guard isShapeMode else { return false }
-            let point = gestureRecognizer.location(in: textBoxOverlayView)
-            if let hitView = textBoxOverlayView.hitTest(point, with: nil),
-               hitView !== textBoxOverlayView {
-                return false
-            }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

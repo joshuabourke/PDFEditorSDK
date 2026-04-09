@@ -73,7 +73,12 @@ struct PDFFormEditorView: View {
     @State private var isShowingInsertPageSheet = false
     @State private var insertPageIndex = 0
     @State private var isShowingRemovePageAlert = false
-    
+    @State private var showEditorSettings = false
+    @State private var showDrawOptions = false
+    @State private var showTextOptions = false
+    @State private var showShapeOptions = false
+    @State private var showEraserOptions = false
+
     ///This is tracking to see if the user has made changes to a document, this is used to display an alert if they attempt to exit without saving.
     @State private var changesNotSaved: Bool = false
     
@@ -206,7 +211,7 @@ struct PDFFormEditorView: View {
                     isShowingSaveAlert = true
                     onSaveNavigate?()
                 } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+                    Text("Save")
                 }
 
                 Button {
@@ -217,7 +222,7 @@ struct PDFFormEditorView: View {
                         isShowingExportAlert = true
                     }
                 } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
+                    Text("Share")
                 }
             }
         }
@@ -335,201 +340,138 @@ struct PDFFormEditorView: View {
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
                     
+                    // MARK: Draw
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Draw")
                             .font(.caption2)
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack(alignment: .center, spacing: 8) {
-                            Button {
-                                viewModel.setTool(.draw)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "pencil.and.scribble")
-                                        .symbolVariant(viewModel.activeTool == .draw ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Draw")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .draw ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-
-                            if viewModel.isDrawingMode {
-                                toolbarSubtoolsRow {
-                                    Menu {
-                                        Button("Fine (1pt)") { viewModel.inkLineWidth = 1.0 }
-                                        Button("Medium (3pt)") { viewModel.inkLineWidth = 3.0 }
-                                        Button("Thick (6pt)") { viewModel.inkLineWidth = 6.0 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "lineweight")
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.inkLineWidth))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-                                    
-                                    ColorPicker("", selection: Binding(
-                                        get: { Color(viewModel.inkColor) },
-                                        set: { viewModel.inkColor = UIColor($0) }
-                                    ))
-                                    .labelsHidden()
-                                    .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-
-                                    Button {
-                                        viewModel.isEraserMode.toggle()
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: viewModel.isEraserMode ? "eraser.fill" : "eraser")
-                                                .fontWeight(.semibold)
-                                            Text("Erase")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground(isActive: viewModel.isEraserMode))
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Menu {
-                                        Button("Small (12pt)") { viewModel.eraserRadius = 6 }
-                                        Button("Medium (18pt)") { viewModel.eraserRadius = 9 }
-                                        Button("Large (26pt)") { viewModel.eraserRadius = 13 }
-                                        Button("XL (36pt)") { viewModel.eraserRadius = 18 }
-                                        Button("XXL (48pt)") { viewModel.eraserRadius = 24 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "circle.dashed")
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.eraserRadius * 2))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-                                }
-                            }
+                        VStack(spacing: 4) {
+                            Image(systemName: "pencil.and.scribble")
+                                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Draw").fontWeight(.semibold)
                         }
-                        .animation(.linear(duration: 0.2), value: viewModel.isDrawingMode)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(
+                            viewModel.isDrawingMode && !viewModel.isEraserMode
+                                ? Color.accentColor.opacity(0.3)
+                                : Color.secondary.opacity(0.1),
+                            in: .rect(cornerRadius: 8)
+                        )
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    if !viewModel.isDrawingMode { viewModel.setTool(.draw) }
+                                    showDrawOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    viewModel.setTool(.draw)
+                                }
+                            )
+                        )
+                        .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
+                            DrawToolOptionsView(
+                                inkColor: Binding(
+                                    get: { Color(viewModel.inkColor) },
+                                    set: { viewModel.inkColor = UIColor($0) }
+                                ),
+                                inkLineWidth: $viewModel.inkLineWidth
+                            )
+                        }
                     }
-                    
+
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
-                    
+
+                    // MARK: Erase
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Erase")
+                            .font(.caption2)
+                            .tracking(0.5)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 4) {
+                            Image(systemName: "eraser")
+                                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Erase").fontWeight(.semibold)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(
+                            viewModel.isEraserMode
+                                ? Color.accentColor.opacity(0.3)
+                                : Color.secondary.opacity(0.1),
+                            in: .rect(cornerRadius: 8)
+                        )
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    viewModel.setTool(.erase)
+                                    showEraserOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    viewModel.setTool(.erase)
+                                }
+                            )
+                        )
+                        .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
+                            EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
+                        }
+                    }
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.25))
+                        .frame(width: 1, height: 36)
+                        .padding(.top, 14)
+
+                    // MARK: Text
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Text")
                             .font(.caption2)
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack(alignment: .center, spacing: 8) {
-                            Button {
-                                viewModel.setTool(.text)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "character.cursor.ibeam")
-                                        .symbolVariant(viewModel.activeTool == .text ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Text")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .text ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-
-                            if viewModel.isTextMode {
-                                toolbarSubtoolsRow {
-
-                                    Menu {
-                                        Button("Black") { viewModel.textBoxTextColor = .label }
-                                        Button("White") { viewModel.textBoxTextColor = .white }
-                                        Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
-                                        Button("Red") { viewModel.textBoxTextColor = .systemRed }
-                                        Button("Green") { viewModel.textBoxTextColor = .systemGreen }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "square.fill")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                                .foregroundStyle(Color(viewModel.textBoxTextColor))
-                                            Text("Text")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-                                    
-                                    Menu {
-                                        Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
-                                        Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
-                                        Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
-                                        Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
-                                        Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
-                                        Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "square.fill")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                                .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
-                                            Text("BG")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    Menu {
-                                        Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
-                                        Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
-                                        Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
-                                        Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "textformat.size")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.textBoxFontSize))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    Button {
-                                        viewModel.textBoxIsBold.toggle()
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "bold")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                            Text("Bold")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
+                        VStack(spacing: 4) {
+                            Image(systemName: "character.cursor.ibeam")
+                                .symbolVariant(viewModel.isTextMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Text").fontWeight(.semibold)
                         }
-                        .animation(.linear(duration: 0.2), value: viewModel.isTextMode)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    if !viewModel.isTextMode { viewModel.setTool(.text) }
+                                    showTextOptions = true
+                                },
+                                TapGesture().onEnded { viewModel.setTool(.text) }
+                            )
+                        )
+                        .popover(isPresented: $showTextOptions, arrowEdge: .top) {
+                            TextToolOptionsView(
+                                textColor: Binding(
+                                    get: { Color(viewModel.textBoxTextColor) },
+                                    set: { viewModel.textBoxTextColor = UIColor($0) }
+                                ),
+                                backgroundColor: Binding(
+                                    get: { Color(viewModel.textBoxBackgroundColor) },
+                                    set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+                                ),
+                                fontSize: $viewModel.textBoxFontSize,
+                                isBold: $viewModel.textBoxIsBold
+                            )
+                        }
                     }
                     
                     Rectangle()
@@ -609,6 +551,41 @@ struct PDFFormEditorView: View {
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
 
+                    // MARK: Settings Section
+                    VStack(spacing: 6) {
+                        Text("Settings")
+                            .font(.caption2)
+                            .tracking(0.5)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showEditorSettings.toggle()
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .symbolVariant(showEditorSettings ? .fill : .none)
+                                    .fontWeight(.semibold)
+                                Text("Settings")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundStyle(Color.accentColor)
+                            .padding(6)
+                            .background(showEditorSettings ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showEditorSettings, arrowEdge: .top) {
+                            EditorSettingsView(
+                                drawWithFinger: $viewModel.drawWithFinger,
+                                pencilOnlyAnnotations: $viewModel.pencilOnlyAnnotations
+                            )
+                        }
+                    }
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.25))
+                        .frame(width: 1, height: 36)
+                        .padding(.top, 14)
+
                     VStack(spacing: 6) {
                         Text("Pages")
                             .font(.caption2)
@@ -676,62 +653,34 @@ struct PDFFormEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            HStack(alignment: .center, spacing: 8) {
-                Button { viewModel.setTool(.shape) } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "square.on.circle")
-                            .symbolVariant(viewModel.activeTool == .shape ? .fill : .none)
-                            .fontWeight(.semibold)
-                        Text("Shape").fontWeight(.semibold)
-                    }
-                    .foregroundStyle(Color.accentColor)
-                    .padding(6)
-                    .background(viewModel.activeTool == .shape ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                if viewModel.isShapeMode {
-                    shapeSubtoolsRow
-                }
+            VStack(spacing: 4) {
+                Image(systemName: iconName(for: viewModel.activeShapeKind))
+                    .symbolVariant(viewModel.isShapeMode ? .fill : .none)
+                    .fontWeight(.semibold)
+                Text("Shape").fontWeight(.semibold)
             }
-            .animation(.linear(duration: 0.2), value: viewModel.isShapeMode)
-        }
-    }
-
-    @ViewBuilder
-    private var shapeSubtoolsRow: some View {
-        HStack(alignment: .center, spacing: 8) {
-            ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
-                Button { viewModel.activeShapeKind = kind } label: {
-                    toolbarChip {
-                        Image(systemName: iconName(for: kind)).fontWeight(.semibold)
-                        Text(labelText(for: kind)).fontWeight(.semibold)
-                    }
-                    .foregroundStyle(Color.accentColor)
-                    .padding(4)
-                    .background(toolbarChipBackground(isActive: viewModel.activeShapeKind == kind))
-                }
-                .buttonStyle(.plain)
-            }
-            ColorPicker("", selection: Binding(
-                get: { Color(viewModel.shapeStrokeColor) },
-                set: { viewModel.shapeStrokeColor = UIColor($0) }
-            ))
-            .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-            Menu {
-                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
-                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
-                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
-                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "lineweight").fontWeight(.semibold)
-                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
-                }
-                .foregroundStyle(Color.accentColor)
-                .padding(4)
-                .background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
+            .padding(6)
+            .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .gesture(
+                ExclusiveGesture(
+                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        if !viewModel.isShapeMode { viewModel.setTool(.shape) }
+                        showShapeOptions = true
+                    },
+                    TapGesture().onEnded { viewModel.setTool(.shape) }
+                )
+            )
+            .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
+                ShapeToolOptionsView(
+                    shapeKind: $viewModel.activeShapeKind,
+                    strokeColor: Binding(
+                        get: { Color(viewModel.shapeStrokeColor) },
+                        set: { viewModel.shapeStrokeColor = UIColor($0) }
+                    ),
+                    lineWidth: $viewModel.shapeLineWidth
+                )
             }
         }
     }
@@ -923,13 +872,6 @@ struct PDFFormEditorView: View {
             .background(isActive ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
     }
 
-    /// Draw/Text subtools in a plain row so chips match the rest of the toolbar (no separate capsule).
-    private func toolbarSubtoolsRow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .center, spacing: 8) {
-            content()
-        }
-    }
-    
     private func insertPageLabel(for index: Int) -> String {
         let pageNumber = index + 1
         if index == 0 {
@@ -1073,6 +1015,8 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.setFormFieldEntryEnabled(viewModel.activeTool == .form)
         pdfView.isUserInteractionEnabled = !viewModel.pageScrollLocked
         pdfView.formFieldHighlightFilter = viewModel.shouldHighlightFormField
+        pdfView.drawWithFinger = viewModel.drawWithFinger
+        pdfView.pencilOnlyAnnotations = viewModel.pencilOnlyAnnotations
     }
 }
 

@@ -29,6 +29,7 @@ enum EditorTool {
     case select
     case form
     case draw
+    case erase
     case text
     case shape
     case pencilKit
@@ -149,6 +150,13 @@ struct RGBAColor: Codable {
         var b: CGFloat = 0
         var a: CGFloat = 0
         color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        self.r = r
+        self.g = g
+        self.b = b
+        self.a = a
+    }
+    
+    init(r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
         self.r = r
         self.g = g
         self.b = b

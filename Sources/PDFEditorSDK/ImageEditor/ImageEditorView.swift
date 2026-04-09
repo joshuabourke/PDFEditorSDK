@@ -54,6 +54,11 @@ struct ImageFormEditorView: View {
     @State private var isShowingShareSheet = false
     @State private var exportedImage: UIImage?
     @State private var changesNotSaved = false
+    @State private var showEditorSettings = false
+    @State private var showDrawOptions = false
+    @State private var showTextOptions = false
+    @State private var showShapeOptions = false
+    @State private var showEraserOptions = false
 
     var body: some View {
         VStack {
@@ -102,7 +107,7 @@ struct ImageFormEditorView: View {
                     viewModel.saveImage()
                     isShowingSaveAlert = true
                 } label: {
-                    Label("Save", systemImage: "square.and.arrow.down")
+                    Text("Save")
                 }
 
                 Button {
@@ -111,7 +116,7 @@ struct ImageFormEditorView: View {
                         isShowingShareSheet = true
                     }
                 } label: {
-                    Label("Export", systemImage: "square.and.arrow.up")
+                    Text("Share")
                 }
             }
         }
@@ -198,84 +203,81 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack(alignment: .center, spacing: 8) {
-                            Button {
-                                viewModel.setTool(.draw)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "pencil.and.scribble")
-                                        .symbolVariant(viewModel.activeTool == .draw ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Draw")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .draw ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-
-                            if viewModel.isDrawingMode {
-                                toolbarSubtoolsRow {
-                                    Menu {
-                                        Button("Fine (1pt)") { viewModel.inkLineWidth = 1.0 }
-                                        Button("Medium (3pt)") { viewModel.inkLineWidth = 3.0 }
-                                        Button("Thick (6pt)") { viewModel.inkLineWidth = 6.0 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "lineweight")
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.inkLineWidth))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    ColorPicker("", selection: Binding(
-                                        get: { Color(viewModel.inkColor) },
-                                        set: { viewModel.inkColor = UIColor($0) }
-                                    ))
-                                    .labelsHidden()
-                                    .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-
-                                    Button {
-                                        viewModel.isEraserMode.toggle()
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: viewModel.isEraserMode ? "eraser.fill" : "eraser")
-                                                .fontWeight(.semibold)
-                                            Text("Erase")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground(isActive: viewModel.isEraserMode))
-                                    }
-                                    .buttonStyle(.plain)
-
-                                    Menu {
-                                        Button("Small (12pt)") { viewModel.eraserRadius = 6 }
-                                        Button("Medium (18pt)") { viewModel.eraserRadius = 9 }
-                                        Button("Large (26pt)") { viewModel.eraserRadius = 13 }
-                                        Button("XL (36pt)") { viewModel.eraserRadius = 18 }
-                                        Button("XXL (48pt)") { viewModel.eraserRadius = 24 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "circle.dashed")
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.eraserRadius * 2))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-                                }
-                            }
+                        VStack(spacing: 4) {
+                            Image(systemName: "pencil.and.scribble")
+                                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Draw").fontWeight(.semibold)
                         }
-                        .animation(.linear(duration: 0.2), value: viewModel.isDrawingMode)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(
+                            viewModel.isDrawingMode && !viewModel.isEraserMode
+                                ? Color.accentColor.opacity(0.3)
+                                : Color.secondary.opacity(0.1),
+                            in: .rect(cornerRadius: 8)
+                        )
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    viewModel.setTool(.draw)
+                                    showDrawOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    viewModel.setTool(.draw)
+                                }
+                            )
+                        )
+                        .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
+                            DrawToolOptionsView(
+                                inkColor: Binding(
+                                    get: { Color(viewModel.inkColor) },
+                                    set: { viewModel.inkColor = UIColor($0) }
+                                ),
+                                inkLineWidth: $viewModel.inkLineWidth
+                            )
+                        }
+                    }
+
+                    toolbarDivider
+
+                    // MARK: Erase Section
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Erase")
+                            .font(.caption2)
+                            .tracking(0.5)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 4) {
+                            Image(systemName: "eraser")
+                                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Erase").fontWeight(.semibold)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(
+                            viewModel.isEraserMode
+                                ? Color.accentColor.opacity(0.3)
+                                : Color.secondary.opacity(0.1),
+                            in: .rect(cornerRadius: 8)
+                        )
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    viewModel.setTool(.erase)
+                                    showEraserOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    viewModel.setTool(.erase)
+                                }
+                            )
+                        )
+                        .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
+                            EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
+                        }
                     }
 
                     toolbarDivider
@@ -287,103 +289,39 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack(alignment: .center, spacing: 8) {
-                            Button {
-                                viewModel.setTool(.text)
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "character.cursor.ibeam")
-                                        .symbolVariant(viewModel.activeTool == .text ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Text")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.activeTool == .text ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                            }
-                            .buttonStyle(.plain)
-
-                            if viewModel.isTextMode {
-                                toolbarSubtoolsRow {
-                                    Menu {
-                                        Button("Black") { viewModel.textBoxTextColor = .label }
-                                        Button("White") { viewModel.textBoxTextColor = .white }
-                                        Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
-                                        Button("Red") { viewModel.textBoxTextColor = .systemRed }
-                                        Button("Green") { viewModel.textBoxTextColor = .systemGreen }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "square.fill")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                                .foregroundStyle(Color(viewModel.textBoxTextColor))
-                                            Text("Text")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    Menu {
-                                        Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
-                                        Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
-                                        Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
-                                        Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
-                                        Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
-                                        Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "square.fill")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                                .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
-                                            Text("BG")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    Menu {
-                                        Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
-                                        Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
-                                        Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
-                                        Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "textformat.size")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                            Text("\(Int(viewModel.textBoxFontSize))pt")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground())
-                                    }
-
-                                    Button {
-                                        viewModel.textBoxIsBold.toggle()
-                                    } label: {
-                                        toolbarChip {
-                                            Image(systemName: "bold")
-                                                .font(.title3)
-                                                .fontWeight(.semibold)
-                                            Text("Bold")
-                                                .fontWeight(.semibold)
-                                        }
-                                        .foregroundStyle(Color.accentColor)
-                                        .padding(4)
-                                        .background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
+                        VStack(spacing: 4) {
+                            Image(systemName: "character.cursor.ibeam")
+                                .symbolVariant(viewModel.isTextMode ? .fill : .none)
+                                .fontWeight(.semibold)
+                            Text("Text").fontWeight(.semibold)
                         }
-                        .animation(.linear(duration: 0.2), value: viewModel.isTextMode)
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    if !viewModel.isTextMode { viewModel.setTool(.text) }
+                                    showTextOptions = true
+                                },
+                                TapGesture().onEnded { viewModel.setTool(.text) }
+                            )
+                        )
+                        .popover(isPresented: $showTextOptions, arrowEdge: .top) {
+                            TextToolOptionsView(
+                                textColor: Binding(
+                                    get: { Color(viewModel.textBoxTextColor) },
+                                    set: { viewModel.textBoxTextColor = UIColor($0) }
+                                ),
+                                backgroundColor: Binding(
+                                    get: { Color(viewModel.textBoxBackgroundColor) },
+                                    set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+                                ),
+                                fontSize: $viewModel.textBoxFontSize,
+                                isBold: $viewModel.textBoxIsBold
+                            )
+                        }
                     }
 
                     toolbarDivider
@@ -444,6 +382,38 @@ struct ImageFormEditorView: View {
                         .buttonStyle(.plain)
                     }
 
+                    toolbarDivider
+
+                    // MARK: Settings Section
+                    VStack(spacing: 6) {
+                        Text("Settings")
+                            .font(.caption2)
+                            .tracking(0.5)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Button {
+                            showEditorSettings.toggle()
+                        } label: {
+                            VStack(spacing: 4) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .symbolVariant(showEditorSettings ? .fill : .none)
+                                    .fontWeight(.semibold)
+                                Text("Settings")
+                                    .fontWeight(.semibold)
+                            }
+                            .foregroundStyle(Color.accentColor)
+                            .padding(6)
+                            .background(showEditorSettings ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .popover(isPresented: $showEditorSettings, arrowEdge: .top) {
+                            EditorSettingsView(
+                                drawWithFinger: $viewModel.drawWithFinger,
+                                pencilOnlyAnnotations: $viewModel.pencilOnlyAnnotations
+                            )
+                        }
+                    }
+
                 }//: HSTACK
             }//: SCROLL
         }//: VSTACK
@@ -502,61 +472,34 @@ struct ImageFormEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            HStack(alignment: .center, spacing: 8) {
-                Button { viewModel.setTool(.shape) } label: {
-                    VStack(spacing: 4) {
-                        Image(systemName: "square.on.circle")
-                            .symbolVariant(viewModel.activeTool == .shape ? .fill : .none)
-                            .fontWeight(.semibold)
-                        Text("Shape").fontWeight(.semibold)
-                    }
-                    .foregroundStyle(Color.accentColor)
-                    .padding(6)
-                    .background(viewModel.activeTool == .shape ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-
-                if viewModel.isShapeMode {
-                    imageShapeSubtoolsRow
-                }
+            VStack(spacing: 4) {
+                Image(systemName: iconName(for: viewModel.activeShapeKind))
+                    .symbolVariant(viewModel.isShapeMode ? .fill : .none)
+                    .fontWeight(.semibold)
+                Text("Shape").fontWeight(.semibold)
             }
-            .animation(.linear(duration: 0.2), value: viewModel.isShapeMode)
-        }
-    }
-
-    @ViewBuilder private var imageShapeSubtoolsRow: some View {
-        toolbarSubtoolsRow {
-            ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
-                Button { viewModel.activeShapeKind = kind } label: {
-                    toolbarChip {
-                        Image(systemName: iconName(for: kind)).fontWeight(.semibold)
-                        Text(labelText(for: kind)).fontWeight(.semibold)
-                    }
-                    .foregroundStyle(Color.accentColor)
-                    .padding(4)
-                    .background(toolbarChipBackground(isActive: viewModel.activeShapeKind == kind))
-                }
-                .buttonStyle(.plain)
-            }
-            ColorPicker("", selection: Binding(
-                get: { Color(viewModel.shapeStrokeColor) },
-                set: { viewModel.shapeStrokeColor = UIColor($0) }
-            ))
-            .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-            Menu {
-                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
-                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
-                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
-                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "lineweight").fontWeight(.semibold)
-                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
-                }
-                .foregroundStyle(Color.accentColor)
-                .padding(4)
-                .background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
+            .padding(6)
+            .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+            .contentShape(Rectangle())
+            .gesture(
+                ExclusiveGesture(
+                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        if !viewModel.isShapeMode { viewModel.setTool(.shape) }
+                        showShapeOptions = true
+                    },
+                    TapGesture().onEnded { viewModel.setTool(.shape) }
+                )
+            )
+            .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
+                ShapeToolOptionsView(
+                    shapeKind: $viewModel.activeShapeKind,
+                    strokeColor: Binding(
+                        get: { Color(viewModel.shapeStrokeColor) },
+                        set: { viewModel.shapeStrokeColor = UIColor($0) }
+                    ),
+                    lineWidth: $viewModel.shapeLineWidth
+                )
             }
         }
     }
@@ -766,9 +709,13 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         context.coordinator.drawingView = drawingView
         context.coordinator.scrollView = scrollView
 
-        // In select mode allow 1-finger scrolling; otherwise require 2 fingers
-        // so that 1-finger input is reserved for drawing / tool gestures.
-        updateScrollGestureRequirements(scrollView, isSelectMode: viewModel.isSelectMode)
+        // In select mode or pencil-only mode allow 1-finger scrolling; otherwise
+        // require 2 fingers so that 1-finger input is reserved for drawing / tool gestures.
+        updateScrollGestureRequirements(
+            scrollView,
+            isSelectMode: viewModel.isSelectMode,
+            pencilOnlyAnnotations: viewModel.pencilOnlyAnnotations
+        )
 
         return scrollView
     }
@@ -794,16 +741,41 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         view.isPencilKitMode = viewModel.activeTool == .pencilKit
         view.currentImageBorderWidth = viewModel.imageBorderWidth
         view.currentImageBorderColor = viewModel.imageBorderColor
+        view.drawWithFinger = viewModel.drawWithFinger
+        view.pencilOnlyAnnotations = viewModel.pencilOnlyAnnotations
 
-        updateScrollGestureRequirements(scrollView, isSelectMode: viewModel.isSelectMode)
+        updateScrollGestureRequirements(
+            scrollView,
+            isSelectMode: viewModel.isSelectMode,
+            pencilOnlyAnnotations: viewModel.pencilOnlyAnnotations
+        )
     }
 
-    /// In select mode the user can scroll with 1 finger. In every other tool mode
-    /// scrolling requires 2 fingers so that single-finger input is reserved for
-    /// drawing, erasing, shape creation, etc.
-    private func updateScrollGestureRequirements(_ scrollView: UIScrollView, isSelectMode: Bool) {
-        scrollView.panGestureRecognizer.minimumNumberOfTouches = isSelectMode ? 1 : 2
+    /// Controls how many fingers the scroll view requires for panning, and which
+    /// touch types it accepts.
+    ///
+    /// - Select mode: 1 finger, all touch types (no drawing gesture to conflict with).
+    /// - Pencil-only mode: 1 finger, **finger-only** — the pencil is exclusively
+    ///   handled by the annotation gesture recognisers so it never races against the
+    ///   scroll pan for the same pencil drag.
+    /// - All other annotation modes: 2 fingers (single finger is reserved for
+    ///   drawing, erasing, shape creation, etc.).
+    private func updateScrollGestureRequirements(
+        _ scrollView: UIScrollView,
+        isSelectMode: Bool,
+        pencilOnlyAnnotations: Bool
+    ) {
+        let requiresTwoFingers = !isSelectMode && !pencilOnlyAnnotations
+        scrollView.panGestureRecognizer.minimumNumberOfTouches = requiresTwoFingers ? 2 : 1
         scrollView.panGestureRecognizer.maximumNumberOfTouches = 2
+
+        // Restrict to finger-only in pencil-only mode so pencil drags are claimed
+        // solely by the annotation gesture recognisers (shapePanGesture, textBoxPanGesture,
+        // pencilGesture) and never cause accidental scrolling.
+        scrollView.panGestureRecognizer.allowedTouchTypes = pencilOnlyAnnotations
+            ? [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            : [NSNumber(value: UITouch.TouchType.direct.rawValue),
+               NSNumber(value: UITouch.TouchType.pencil.rawValue)]
     }
 
     // MARK: - Coordinator
@@ -816,277 +788,6 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
             drawingView
         }
     }
-}
-
-// MARK: - View Model
-
-@MainActor
-@Observable
-class ImageEditorViewModel {
-    let sourceImage: UIImage
-    var activeTool: EditorTool = .draw
-    var inkColor: UIColor = .systemBlue
-    var inkLineWidth: CGFloat = 3.0
-    var isEraserMode: Bool = false
-    var eraserRadius: CGFloat = 9
-    var textBoxBackgroundColor: UIColor = .systemYellow
-    var textBoxFontSize: CGFloat = 14
-    var textBoxIsBold: Bool = false
-    var textBoxTextColor: UIColor = .label
-    var hasSelectedOverlayObject: Bool = false
-    var showImageSourceDialog: Bool = false
-    var saveStatus: String?
-    var undoStack: [ImageUndoAction] = []
-    var redoStack: [ImageUndoAction] = []
-    weak var canvasView: DrawingImageView?
-    private let onSave: ((UIImage) -> Void)?
-    private let onExport: ((UIImage) -> Void)?
-    private let maxUndoActions = 50
-
-    var activeShapeKind: OverlayShapeKind = .rectangle
-    var shapeStrokeColor: UIColor = .systemRed
-    var shapeLineWidth: CGFloat = 2.0
-    var imageBorderWidth: CGFloat = 0
-    var imageBorderColor: UIColor = .black
-    var selectedOverlayKind: SelectedOverlayKind?
-
-    var isDrawingMode: Bool { activeTool == .draw }
-    var isTextMode: Bool { activeTool == .text }
-    var isSelectMode: Bool { activeTool == .select }
-    var isShapeMode: Bool { activeTool == .shape }
-    var isPencilKitMode: Bool { activeTool == .pencilKit }
-    var canUndo: Bool { !undoStack.isEmpty }
-    var canRedo: Bool { !redoStack.isEmpty }
-
-    init(sourceImage: UIImage, onSave: ((UIImage) -> Void)? = nil, onExport: ((UIImage) -> Void)? = nil) {
-        self.sourceImage = sourceImage
-        self.onSave = onSave
-        self.onExport = onExport
-    }
-
-    func setTool(_ tool: EditorTool) {
-        // Tapping an already-active tool returns to select mode
-        if activeTool == tool, tool != .select {
-            activeTool = .select
-            canvasView?.endTextEditing()
-            isEraserMode = false
-            return
-        }
-        if tool == .shape {
-            activeTool = .shape
-            canvasView?.endTextEditing()
-            canvasView?.deselectAll()
-            isEraserMode = false
-            return
-        }
-        if tool == .pencilKit {
-            activeTool = .pencilKit
-            canvasView?.endTextEditing()
-            canvasView?.deselectAll()
-            isEraserMode = false
-            return
-        }
-        if tool != .text {
-            canvasView?.endTextEditing()
-        }
-        activeTool = tool
-        if tool != .draw {
-            isEraserMode = false
-        }
-        if tool != .select {
-            canvasView?.deselectAll()
-        }
-    }
-
-    func applyShapeStyleToSelected() {
-        canvasView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
-    }
-
-    func applyImageBorderToSelected() {
-        canvasView?.applyImageBorderToSelected(borderWidth: imageBorderWidth, borderColor: imageBorderColor)
-    }
-
-    func addOverlayImage(_ image: UIImage) {
-        canvasView?.addOverlayImage(image)
-    }
-
-    func deleteSelectedObject() {
-        canvasView?.deleteSelected()
-    }
-
-    func applyTextStyleToSelected() {
-        canvasView?.applyTextStyle(
-            fontSize: textBoxFontSize,
-            isBold: textBoxIsBold,
-            textColor: textBoxTextColor,
-            backgroundColor: textBoxBackgroundColor
-        )
-    }
-
-    func saveImage() {
-        guard let image = canvasView?.renderToImage() else {
-            saveStatus = "Failed to render image"
-            return
-        }
-
-        if let onSave {
-            onSave(image)
-            saveStatus = "Image saved"
-            return
-        }
-
-        // Default: save as JPEG to Documents/ImageEdits/
-        guard let data = image.jpegData(compressionQuality: 0.92) else {
-            saveStatus = "Failed to encode image"
-            return
-        }
-
-        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let folder = documents.appendingPathComponent("ImageEdits", isDirectory: true)
-
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let fileName = "Image-\(Int(Date().timeIntervalSince1970)).jpg"
-            let destination = folder.appendingPathComponent(fileName)
-            try data.write(to: destination)
-            saveStatus = "Saved to: \(fileName)"
-        } catch {
-            saveStatus = "Failed to save image"
-        }
-    }
-
-    @discardableResult
-    func exportImage() -> UIImage? {
-        guard let image = canvasView?.renderToImage() else { return nil }
-        onExport?(image)
-        return image
-    }
-
-    func didMakeChange(_ action: ImageUndoAction) {
-        let resolved = resolveActionIfNeeded(action)
-        undoStack.append(resolved)
-        if undoStack.count > maxUndoActions {
-            undoStack.removeFirst(undoStack.count - maxUndoActions)
-        }
-        redoStack.removeAll()
-    }
-
-    func undo() {
-        guard let action = undoStack.popLast() else { return }
-        let resolved = resolveActionIfNeeded(action)
-        redoStack.append(resolved)
-        performUndo(resolved)
-    }
-
-    func redo() {
-        guard let action = redoStack.popLast() else { return }
-        undoStack.append(action)
-        performRedo(action)
-    }
-
-    private func resolveActionIfNeeded(_ action: ImageUndoAction) -> ImageUndoAction {
-        switch action {
-        case .textBox(let add, let remove):
-            if let add, let current = canvasView?.textBoxState(id: add.id) {
-                return .textBox(add: current, remove: remove)
-            }
-            return action
-        case .imageBox(let add, let remove):
-            if let add, let current = canvasView?.imageBoxState(id: add.id) {
-                return .imageBox(add: current, remove: remove)
-            }
-            return action
-        case .imageShape(let add, let remove):
-            if let add, let current = canvasView?.shapeBoxState(id: add.id) {
-                return .imageShape(add: current, remove: remove)
-            }
-            return action
-        default:
-            return action
-        }
-    }
-
-    private func performUndo(_ action: ImageUndoAction) {
-        switch action {
-        case .stroke(let add, let remove):
-            if let add {
-                canvasView?.removeStroke(id: add.id)
-            }
-            if let remove {
-                canvasView?.addStroke(remove)
-            }
-        case .eraseSession(let old, let new):
-            canvasView?.replaceStrokes(remove: new, add: old)
-        case .textBox(let add, let remove):
-            if let add {
-                canvasView?.removeTextBox(id: add.id)
-            }
-            if let remove {
-                canvasView?.addTextBox(from: remove, beginEditing: false)
-            }
-        case .imageBox(let add, let remove):
-            if let add {
-                canvasView?.removeImageBox(id: add.id)
-            }
-            if let remove {
-                canvasView?.addImageBox(from: remove)
-            }
-        case .imageBoxUpdate(let before, _):
-            canvasView?.updateImageBox(from: before)
-        case .imageShape(let add, let remove):
-            if let add { canvasView?.removeShapeBox(id: add.id) }
-            if let remove { canvasView?.addShapeBox(from: remove) }
-        case .imageShapeUpdate(let before, _):
-            canvasView?.updateShapeBox(from: before)
-        }
-    }
-
-    private func performRedo(_ action: ImageUndoAction) {
-        switch action {
-        case .stroke(let add, let remove):
-            if let add {
-                canvasView?.addStroke(add)
-            }
-            if let remove {
-                canvasView?.removeStroke(id: remove.id)
-            }
-        case .eraseSession(let old, let new):
-            canvasView?.replaceStrokes(remove: old, add: new)
-        case .textBox(let add, let remove):
-            if let add {
-                canvasView?.addTextBox(from: add, beginEditing: false)
-            }
-            if let remove {
-                canvasView?.removeTextBox(id: remove.id)
-            }
-        case .imageBox(let add, let remove):
-            if let add {
-                canvasView?.addImageBox(from: add)
-            }
-            if let remove {
-                canvasView?.removeImageBox(id: remove.id)
-            }
-        case .imageBoxUpdate(_, let after):
-            canvasView?.updateImageBox(from: after)
-        case .imageShape(let add, let remove):
-            if let add { canvasView?.addShapeBox(from: add) }
-            if let remove { canvasView?.removeShapeBox(id: remove.id) }
-        case .imageShapeUpdate(_, let after):
-            canvasView?.updateShapeBox(from: after)
-        }
-    }
-}
-
-// MARK: - ImageUndoAction
-
-enum ImageUndoAction {
-    case stroke(add: InkStroke?, remove: InkStroke?)
-    case eraseSession(old: [InkStroke], new: [InkStroke])
-    case textBox(add: OverlayTextBoxState?, remove: OverlayTextBoxState?)
-    case imageBox(add: OverlayImageState?, remove: OverlayImageState?)
-    case imageBoxUpdate(before: OverlayImageState, after: OverlayImageState)
-    case imageShape(add: OverlayShapeState?, remove: OverlayShapeState?)
-    case imageShapeUpdate(before: OverlayShapeState, after: OverlayShapeState)
 }
 
 // MARK: - InkStroke
@@ -1176,10 +877,10 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     var isDrawingMode = false {
         didSet {
-            pencilGesture?.isEnabled = isDrawingMode
-            // Pan and pinch navigation is now handled by the parent UIScrollView.
-            // The no-op finger gestures are no longer enabled here.
-            if !isDrawingMode {
+            // Pencil gesture handles both drawing strokes and erasing.
+            // Keep it active whenever either mode is on.
+            pencilGesture?.isEnabled = isDrawingMode || isEraserMode
+            if !isDrawingMode && !isEraserMode {
                 hideEraserCircle()
             }
         }
@@ -1209,7 +910,12 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     var currentInkColor: UIColor = .systemBlue
     var currentLineWidth: CGFloat = 3.0
-    var isEraserMode: Bool = false
+    var isEraserMode: Bool = false {
+        didSet {
+            pencilGesture?.isEnabled = isDrawingMode || isEraserMode
+            if !isEraserMode { hideEraserCircle() }
+        }
+    }
     var eraserRadius: CGFloat = 9 {
         didSet { updateEraserCircle() }
     }
@@ -1217,6 +923,30 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     var textBoxFontSize: CGFloat = 14
     var textBoxIsBold: Bool = false
     var textBoxTextColor: UIColor = .label
+
+    /// When `true`, only Apple Pencil triggers drawing, shapes, and text boxes.
+    /// The parent scroll view reverts to single-finger panning so the user
+    /// can navigate freely with a finger in all tool modes.
+    var pencilOnlyAnnotations: Bool = false {
+        didSet { updateAnnotationGestureTouchTypes() }
+    }
+
+    /// When `true`, single-finger touch input is also accepted for drawing.
+    /// The parent scroll view requires two fingers to scroll/pan.
+    var drawWithFinger: Bool = false {
+        didSet { pencilGesture?.includesFingerInput = drawWithFinger }
+    }
+
+    /// Restricts shape and text-box creation gestures to Apple Pencil only when
+    /// `pencilOnlyAnnotations` is on, or restores them to accept finger input again.
+    private func updateAnnotationGestureTouchTypes() {
+        let types: [NSNumber] = pencilOnlyAnnotations
+            ? [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+            : [NSNumber(value: UITouch.TouchType.direct.rawValue),
+               NSNumber(value: UITouch.TouchType.pencil.rawValue)]
+        shapePanGesture?.allowedTouchTypes = types
+        textBoxPanGesture?.allowedTouchTypes = types
+    }
 
     private(set) var strokes: [InkStroke] = []
     private var currentStrokePoints: [CGPoint] = []
@@ -1442,7 +1172,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     // MARK: - PencilDrawingGestureDelegate
 
     func pencilTouchBegan(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode else { return }
+        guard isDrawingMode || isEraserMode else { return }
         let point = touch.location(in: self)
         guard imageContentRect.contains(point) else { return }
         if isEraserMode {
@@ -1456,7 +1186,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     }
 
     func pencilTouchMoved(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode else { return }
+        guard isDrawingMode || isEraserMode else { return }
         let coalescedTouches = event?.coalescedTouches(for: touch) ?? [touch]
         for coalescedTouch in coalescedTouches {
             let point = coalescedTouch.location(in: self)
@@ -1473,7 +1203,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     }
 
     func pencilTouchEnded(_ touch: UITouch, with event: UIEvent?) {
-        guard isDrawingMode else { return }
+        guard isDrawingMode || isEraserMode else { return }
         if isEraserMode {
             let point = touch.location(in: self)
             eraseAt(point)
@@ -1487,7 +1217,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     }
 
     func pencilTouchCancelled(with event: UIEvent?) {
-        guard isDrawingMode else { return }
+        guard isDrawingMode || isEraserMode else { return }
         if isEraserMode {
             commitErase()
             hideEraserCircle()
@@ -2059,24 +1789,19 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === textBoxPanGesture {
             guard isTextMode else { return false }
-            // Only allow text box creation within the image content area
+            // Only allow text box creation within the image content area.
+            // In text mode the user always intends to draw a new text box, so allow
+            // the gesture to begin over any content including existing overlay objects.
             let selfPoint = gestureRecognizer.location(in: self)
             guard imageContentRect.contains(selfPoint) else { return false }
-            let overlayPoint = gestureRecognizer.location(in: overlayView)
-            if let hitView = overlayView.hitTest(overlayPoint, with: nil),
-               hitView !== overlayView {
-                return false
-            }
         }
         if gestureRecognizer === shapePanGesture {
+            // Only allow shape creation within the image content area.
+            // In shape mode the user always intends to draw a new shape, so allow
+            // the gesture to begin over any content including existing overlay objects.
             guard isShapeMode else { return false }
             let selfPoint = gestureRecognizer.location(in: self)
             guard imageContentRect.contains(selfPoint) else { return false }
-            let overlayPoint = gestureRecognizer.location(in: overlayView)
-            if let hitView = overlayView.hitTest(overlayPoint, with: nil),
-               hitView !== overlayView {
-                return false
-            }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)
     }

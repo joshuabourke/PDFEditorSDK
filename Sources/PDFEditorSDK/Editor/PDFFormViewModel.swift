@@ -14,6 +14,8 @@ import CoreText
 @MainActor
 @Observable
 class PDFFormViewModel {
+    private var preferences: EditorPreferences
+    
     var pdfDocument: PDFDocument?
     var activeTool: EditorTool = .form
     var undoStack: [UndoAction] = []
@@ -23,14 +25,48 @@ class PDFFormViewModel {
     var hasSelectedInkAnnotation: Bool = false
     var hasSelectedOverlayObject: Bool = false
     weak var pdfView: DrawingPDFView?
-    var inkColor: UIColor = .systemBlue
-    var inkLineWidth: CGFloat = 3.0
-    var isEraserMode: Bool = false
-    var eraserRadius: CGFloat = 9
-    var textBoxBackgroundColor: UIColor = UIColor.systemYellow
-    var textBoxFontSize: CGFloat = 14
-    var textBoxIsBold: Bool = false
-    var textBoxTextColor: UIColor = .label
+    var inkColor: UIColor {
+        didSet { preferences.inkColor = RGBAColor(inkColor); preferences.save()}
+    }
+    var inkLineWidth: CGFloat {
+        didSet { preferences.inkLineWidth = inkLineWidth; preferences.save()}
+    }
+    var eraserRadius: CGFloat {
+        didSet { preferences.eraserRadius = eraserRadius; preferences.save()}
+    }
+    var textBoxBackgroundColor: UIColor {
+        didSet { preferences.textBoxBackgroundColor = RGBAColor(textBoxBackgroundColor); preferences.save()}
+    }
+    var textBoxFontSize: CGFloat {
+        didSet { preferences.textBoxFontSize = textBoxFontSize; preferences.save()}
+    }
+    var textBoxIsBold: Bool {
+        didSet { preferences.textBoxIsBold = textBoxIsBold; preferences.save()}
+    }
+    var textBoxTextColor: UIColor {
+        didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); preferences.save()}
+    }
+    var activeShapeKind: OverlayShapeKind {
+        didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
+    }
+    var shapeStrokeColor: UIColor {
+        didSet { preferences.shapeStrokeColor = RGBAColor(shapeStrokeColor); preferences.save()}
+    }
+    var shapeLineWidth: CGFloat {
+        didSet { preferences.shapeLineWidth = shapeLineWidth; preferences.save()}
+    }
+    var imageBorderWidth: CGFloat {
+        didSet { preferences.imageBorderWidth = imageBorderWidth; preferences.save()}
+    }
+    var imageBorderColor: UIColor {
+        didSet { preferences.imageBorderColor = RGBAColor(imageBorderColor); preferences.save()}
+    }
+    var drawWithFinger: Bool {
+        didSet { preferences.drawWithFinger = drawWithFinger; preferences.save() }
+    }
+    var pencilOnlyAnnotations: Bool {
+        didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; preferences.save() }
+    }
     var isThumbnailOverlayVisible: Bool = true
     var saveStatus: String?
     var exportStatus: String?
@@ -61,17 +97,38 @@ class PDFFormViewModel {
         self.editableSaveHandler = editableSaveHandler
         self.flattenedExportHandler = flattenedExportHandler
         self.shouldHighlightFormField = shouldHighlightFormField
+        
+        let prefs = EditorPreferences.load()
+        self.preferences = prefs
+        
+        self.inkColor = prefs.inkColor.uiColor
+        self.inkLineWidth = prefs.inkLineWidth
+        
+        self.eraserRadius = prefs.eraserRadius
+        
+        self.textBoxBackgroundColor = prefs.textBoxBackgroundColor.uiColor
+        self.textBoxFontSize = prefs.textBoxFontSize
+        self.textBoxIsBold = prefs.textBoxIsBold
+        self.textBoxTextColor = prefs.textBoxTextColor.uiColor
+        
+        self.activeShapeKind = prefs.activeShapeKind
+        self.shapeStrokeColor = prefs.shapeStrokeColor.uiColor
+        self.shapeLineWidth = prefs.shapeLineWidth
+        
+        self.imageBorderWidth = prefs.imageBorderWidth
+        self.imageBorderColor = prefs.imageBorderColor.uiColor
+
+        self.drawWithFinger = prefs.drawWithFinger
+        self.pencilOnlyAnnotations = prefs.pencilOnlyAnnotations
+
         _ = loadPDF(from: documentURL)
+        
     }
     
-    var activeShapeKind: OverlayShapeKind = .rectangle
-    var shapeStrokeColor: UIColor = .systemRed
-    var shapeLineWidth: CGFloat = 2.0
-    var imageBorderWidth: CGFloat = 0
-    var imageBorderColor: UIColor = .black
     var selectedOverlayKind: SelectedOverlayKind?
 
     var isDrawingMode: Bool { activeTool == .draw }
+    var isEraserMode: Bool { activeTool == .erase }
     var isTextMode: Bool { activeTool == .text }
     var isSelectMode: Bool { activeTool == .select }
     var isShapeMode: Bool { activeTool == .shape }
@@ -96,28 +153,24 @@ class PDFFormViewModel {
         if activeTool == tool, tool != .select {
             activeTool = .select
             pdfView?.endOverlayTextEditing()
-            isEraserMode = false
+
             return
         }
         if tool == .shape {
             activeTool = .shape
             pdfView?.endOverlayTextEditing()
-            isEraserMode = false
+
             return
         }
         if tool == .pencilKit {
             activeTool = .pencilKit
             pdfView?.endOverlayTextEditing()
-            isEraserMode = false
             return
         }
         if tool != .text {
             pdfView?.endOverlayTextEditing()
         }
         activeTool = tool
-        if tool != .draw {
-            isEraserMode = false
-        }
         if tool != .select {
             hasSelectedInkAnnotation = false
             pdfView?.deselectInkAnnotation()
