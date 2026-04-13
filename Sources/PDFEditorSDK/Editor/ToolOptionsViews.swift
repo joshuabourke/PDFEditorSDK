@@ -15,6 +15,7 @@ struct DrawToolOptionsView: View {
         ToolOptionsContainer(title: "Draw Settings") {
             HStack {
                 Label("Color", systemImage: "paintbrush.tip")
+                    .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
                 ColorPicker("", selection: $inkColor)
@@ -26,10 +27,10 @@ struct DrawToolOptionsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Line Width")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 SegmentedOptionRow(
-                    options: [(1.0, "Fine"), (3.0, "Medium"), (6.0, "Thick")],
+                    options: [(1.0, "1pt"), (3.0, "3pt"), (6.0, "6pt")],
                     selected: $inkLineWidth
                 )
             }
@@ -50,6 +51,7 @@ struct TextToolOptionsView: View {
         ToolOptionsContainer(title: "Text Settings") {
             HStack {
                 Label("Text Color", systemImage: "character")
+                    .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
                 ColorPicker("", selection: $textColor)
@@ -61,6 +63,7 @@ struct TextToolOptionsView: View {
 
             HStack {
                 Label("Background", systemImage: "rectangle.fill")
+                    .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
                 ColorPicker("", selection: $backgroundColor, supportsOpacity: true)
@@ -72,8 +75,8 @@ struct TextToolOptionsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Font Size")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 SegmentedOptionRow(
                     options: [(12.0, "12pt"), (14.0, "14pt"), (18.0, "18pt"), (22.0, "22pt")],
                     selected: $fontSize
@@ -85,6 +88,7 @@ struct TextToolOptionsView: View {
 
             Toggle(isOn: $isBold) {
                 Label("Bold", systemImage: "bold")
+                    .font(.caption)
                     .fontWeight(.medium)
             }
             .toolOptionRow()
@@ -103,8 +107,8 @@ struct ShapeToolOptionsView: View {
         ToolOptionsContainer(title: "Shape Settings") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Shape")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 HStack(spacing: 8) {
                     ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
                         ShapeKindButton(kind: kind, isSelected: shapeKind == kind) {
@@ -119,6 +123,7 @@ struct ShapeToolOptionsView: View {
 
             HStack {
                 Label("Stroke Color", systemImage: "paintbrush.tip")
+                    .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
                 ColorPicker("", selection: $strokeColor)
@@ -130,8 +135,8 @@ struct ShapeToolOptionsView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Line Width")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 SegmentedOptionRow(
                     options: [(1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")],
                     selected: $lineWidth
@@ -151,10 +156,16 @@ struct EraserToolOptionsView: View {
         ToolOptionsContainer(title: "Eraser Settings") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Size")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                    .font(.caption)
+                    .fontWeight(.semibold)
                 SegmentedOptionRow(
-                    options: [(6.0, "Sm"), (9.0, "Md"), (13.0, "Lg"), (18.0, "XL"), (24.0, "XXL")],
+                    options: [
+                        (6.0, "6pt"),
+                        (9.0, "9pt"),
+                        (13.0, "13pt"),
+                        (18.0, "18pt"),
+                        (24.0, "24pt"),
+                    ],
                     selected: $eraserRadius
                 )
             }
@@ -193,16 +204,18 @@ struct SegmentedOptionRow<T: Equatable>: View {
     @Binding var selected: T
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             ForEach(Array(options.enumerated()), id: \.offset) { _, pair in
                 Button(pair.1) {
                     selected = pair.0
                 }
                 .buttonStyle(.plain)
-                .font(.subheadline)
+                .font(.caption2)
                 .fontWeight(.medium)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 5)
                 .background(
                     selected == pair.0
                         ? Color.accentColor
@@ -225,12 +238,12 @@ private struct ShapeKindButton: View {
             VStack(spacing: 4) {
                 Image(systemName: iconName)
                     .fontWeight(.semibold)
-                    .font(.title3)
+                    .font(.callout)
                 Text(label)
-                    .font(.caption)
+                    .font(.caption2)
                     .fontWeight(.medium)
             }
-            .frame(width: 72, height: 52)
+            .frame(width: 68, height: 48)
             .background(
                 isSelected ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.1),
                 in: .rect(cornerRadius: 10)

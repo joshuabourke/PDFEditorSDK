@@ -125,7 +125,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
             inkSelectTapGesture?.isEnabled = isSelectMode
-            overlaySelectTapGesture?.isEnabled = isSelectMode
             if !isSelectMode {
                 deselectInkAnnotation()
                 deselectOverlaySelection()
@@ -172,6 +171,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             if !isFormMode {
                 syncFormWidgetTextEditingState()
             }
+            syncScribbleInteraction()
         }
     }
 
@@ -390,6 +390,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private let textBoxLayer = CAShapeLayer()
     private var textBoxStartPoint: CGPoint?
     private var textModeTouchStart: CGPoint?
+    /// Short finger tap on the PDF while a text overlay is focused (`shouldInterceptAllTouches`); avoids clearing focus on every draw stroke.
+    private var fingerDismissOverlayTouchStart: CGPoint?
     private let textBoxOverlayView = UIView()
     /// Sits above PDF page tiles (below `textBoxOverlayView`). The tint for the field that is
     /// actively being edited is omitted; other editable fields stay highlighted.
@@ -555,6 +557,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         setupFormPencilTapGesture()
         setupPencilTextTapGesture()
         setupPencilKitManager()
+        syncScribbleInteraction()
     }
 
     private func setupPencilKitManager() {
@@ -747,9 +750,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if isSelectMode {
             deselectInkAnnotation()
             deselectOverlaySelection()
-        } else if isTextMode {
+        } else if isTextMode || selectedTextBoxID != nil || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder }) {
             // Dismiss keyboard and deselect the active text box so the user
-            // can draw a new one on the next drag.
+            // can draw a new one on the next drag (text tool), or clear focus after editing while
+            // another tool is active (draw/erase/shape/PencilKit).
             endOverlayTextEditing()
             deselectOverlaySelection()
         }
@@ -1569,6 +1573,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
+        box.onTextEditingFocusChange = { [weak self] in
+            self?.syncOverlayCanvasDismissTap()
+        }
         box.setSelectMode(isSelectMode)
         textBoxOverlayView.addSubview(box)
         textBoxOverlayView.bringSubviewToFront(box)
@@ -1711,6 +1718,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     func endOverlayTextEditing() {
         textBoxViews.values.forEach { $0.endEditingIfNeeded() }
         textBoxOverlayView.endEditing(true)
+        syncOverlayCanvasDismissTap()
     }
 
     private func selectTextBox(id: UUID) {
@@ -1752,6 +1760,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             box.setSelected(id == selectedShapeID)
         }
         syncOverlaySelectionState()
+        syncOverlayCanvasDismissTap()
     }
 
     private func syncOverlaySelectionState() {
@@ -2207,16 +2216,14 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
 
     /// Single source of truth for Scribble on the PDF surface and on overlay text boxes.
-    /// `UIIndirectScribbleInteraction` on this view is only useful in form-filling mode; in every
-    /// other active tool mode the pencil is driving gestures (drawing, selecting, moving overlays,
-    /// placing shapes, PencilKit) and that interaction would intercept touches before gestures run.
     ///
-    /// Overlay `TextBoxView` embeds a `UITextView`, which still participates in Scribble unless
-    /// `isScribbleEnabled` is turned off while those tools are active (see `syncOverlayTextViewsScribbleEnabled`).
-    /// When no such tool is active, Scribble on those text views stays enabled for handwriting input.
+    /// - **PDF** (`UIIndirectScribbleInteraction`): enabled only in **Form** mode so pencil can
+    ///   write into PDF form widgets.
+    /// - **Overlay text boxes** (`UITextView`): Scribble enabled only in **Text** or **Form** mode;
+    ///   draw, erase, PencilKit, select, and shape tools suppress overlay Scribble so the pencil stays on the canvas.
     private func syncScribbleInteraction() {
         if let scribble = scribbleInteraction {
-            let shouldEnable = !isDrawingMode && !isEraserMode && !isTextMode && !isSelectMode && !isShapeMode && !isPencilKitMode
+            let shouldEnable = isFormMode
             let isAdded = interactions.contains { $0 === scribble }
             if shouldEnable && !isAdded {
                 addInteraction(scribble)
@@ -2225,16 +2232,24 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             }
         }
         syncOverlayTextViewsScribbleEnabled()
+        syncOverlayCanvasDismissTap()
     }
 
-    /// Overlay text boxes use `UITextView`, which participates in Scribble by default. While any
-    /// tool is routing the pencil to the canvas (draw, erase, PencilKit, shapes, etc.), disable
-    /// Scribble on those views so strokes near an existing box are not captured as handwriting input.
+    /// Overlay `UITextView` Scribble: on for **Text** and **Form** tools only.
     private func syncOverlayTextViewsScribbleEnabled() {
-        let scribbleAllowedOnTextOverlays = !isDrawingMode && !isEraserMode && !isTextMode && !isSelectMode && !isShapeMode && !isPencilKitMode
+        let scribbleAllowedOnTextOverlays = isTextMode || isFormMode
         for box in textBoxViews.values {
             box.setTextInputScribbleEnabled(scribbleAllowedOnTextOverlays)
         }
+    }
+
+    /// Tap on empty overlay canvas: select-mode deselect, text-mode dismiss, or (when a text box
+    /// is focused/selected outside Text/Select tools) dismiss keyboard — without blocking drawing.
+    private func syncOverlayCanvasDismissTap() {
+        let overlayTextNeedsDismissTap = selectedTextBoxID != nil
+            || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder })
+        let enable = !isFormMode && (isSelectMode || isTextMode || overlayTextNeedsDismissTap)
+        overlaySelectTapGesture?.isEnabled = enable
     }
 
     // MARK: - Form Field Tracking
@@ -2594,6 +2609,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if shouldInterceptAllTouches {
             if isTextMode, let touch = touches.first {
                 textModeTouchStart = touch.location(in: self)
+            } else if !isFormMode, let touch = touches.first, touch.type == .direct,
+                      selectedTextBoxID != nil || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder }) {
+                fingerDismissOverlayTouchStart = touch.location(in: self)
             }
             return
         }
@@ -2619,8 +2637,17 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                         handleTextModeTap(at: start)
                     }
                 }
+            } else if !isFormMode, let touch = touches.first, touch.type == .direct,
+                      let start = fingerDismissOverlayTouchStart {
+                let end = touch.location(in: self)
+                let distance = hypot(end.x - start.x, end.y - start.y)
+                if distance < 15, textBoxViewAtPoint(end) == nil {
+                    endOverlayTextEditing()
+                    deselectOverlaySelection()
+                }
             }
             textModeTouchStart = nil
+            fingerDismissOverlayTouchStart = nil
             return
         }
         super.touchesEnded(touches, with: event)
@@ -2631,6 +2658,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         if shouldInterceptAllTouches {
             // Pan gesture began — it owns this touch, clear the tap tracker.
             textModeTouchStart = nil
+            fingerDismissOverlayTouchStart = nil
             return
         }
         super.touchesCancelled(touches, with: event)

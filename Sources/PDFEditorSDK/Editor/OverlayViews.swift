@@ -9,8 +9,10 @@ import SwiftUI
 import PDFKit
 import UIKit
 
-final class TextBoxView: UIView, UITextViewDelegate {
+final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelegate {
     private let textView = UITextView()
+    /// Added only while Scribble should be suppressed; `UITextView` has no `isScribbleEnabled` (unlike `UITextField`).
+    private var scribbleSuppressionInteraction: UIScribbleInteraction?
     private let padding = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
     private let moveHandle = UIView()
     private let moveIcon = UIImageView()
@@ -29,6 +31,8 @@ final class TextBoxView: UIView, UITextViewDelegate {
         textView.font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false
     }
     var onSelect: ((UUID) -> Void)?
+    /// Called when the embedded `UITextView` gains or loses first responder (keyboard show/hide).
+    var onTextEditingFocusChange: (() -> Void)?
     let id: UUID
     private var startFrame: CGRect = .zero
     private var pinchStartFrame: CGRect = .zero
@@ -141,9 +145,24 @@ final class TextBoxView: UIView, UITextViewDelegate {
         textView.textColor = color
     }
 
-    /// When `false`, Apple Pencil Scribble will not target this text view (drawing/erase/etc. should win).
+    var isTextInputFirstResponder: Bool { textView.isFirstResponder }
+
+    /// When `false`, Scribble is suppressed on this `UITextView` via `UIScribbleInteraction`.
     func setTextInputScribbleEnabled(_ enabled: Bool) {
-        textView.isScribbleEnabled = enabled
+        if enabled {
+            if let interaction = scribbleSuppressionInteraction {
+                textView.removeInteraction(interaction)
+                scribbleSuppressionInteraction = nil
+            }
+        } else if scribbleSuppressionInteraction == nil {
+            let interaction = UIScribbleInteraction(delegate: self)
+            scribbleSuppressionInteraction = interaction
+            textView.addInteraction(interaction)
+        }
+    }
+
+    func scribbleInteraction(_ interaction: UIScribbleInteraction, shouldBeginAt location: CGPoint) -> Bool {
+        false
     }
     
     func beginEditing() {
@@ -288,6 +307,11 @@ final class TextBoxView: UIView, UITextViewDelegate {
     func textViewDidBeginEditing(_ textView: UITextView) {
         isSelected = true
         onSelect?(id)
+        onTextEditingFocusChange?()
+    }
+
+    func textViewDidEndEditing(_ textView: UITextView) {
+        onTextEditingFocusChange?()
     }
 }
 
