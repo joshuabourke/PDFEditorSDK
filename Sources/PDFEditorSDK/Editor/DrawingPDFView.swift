@@ -92,6 +92,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             // Pencil gesture must also stay active when the standalone erase tool is on.
             pencilDrawingGesture?.isEnabled = isDrawingMode || isEraserMode
             updateNavigationGestureState()
+            if isFormMode { syncFormWidgetTextEditingState() }
         }
     }
 
@@ -113,6 +114,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             }
             updateNavigationGestureState()
             updatePencilTextTapGesture()
+            if isFormMode { syncFormWidgetTextEditingState() }
         }
     }
 
@@ -158,13 +160,35 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textBoxOverlayView.isUserInteractionEnabled = !isFormMode
             if isFormMode {
                 enableTextSelection()
+                // Logs: PDFKit double-tap zoom must stay off for all of Form mode so it never
+                // competes with `PDFTextWidgetTextView` word selection / body text gestures.
+                setDoubleTapZoomEnabled(false)
+                syncFormWidgetTextEditingState()
             } else if !isDrawingMode && !isTextMode {
                 enableTextSelection()
             }
             formPencilTapGesture?.isEnabled = isFormMode
             updateFormFieldHighlights()
+            if !isFormMode {
+                syncFormWidgetTextEditingState()
+            }
         }
     }
+
+    /// True while a PDF-hosted UITextField/UITextView (form widget) is first responder.
+    /// Drives double-tap zoom off and PDF inner-scroll tuning (`delaysContentTouches`, two-finger pan)
+    /// so the embedded `UITextView` receives long-press and single-finger drags for selection.
+    private var isFormFieldTextActive = false
+    private var formWidgetTextSyncScheduled = false
+    /// Saved `PDFView` inner scroll settings while a widget text control is first responder.
+    private var savedPDFScrollPanMinTouches: Int?
+    private var savedPDFScrollPanMaxTouches: Int?
+    private var savedPDFScrollDelaysContentTouches: Bool?
+    /// Runtime logs showed selection-driven scrolling uses `go(to:rect:on:)` (not `go(to:selection)`).
+    /// While this deadline is active, pin the scroll offset around `super.go(to:rect:on:)` so body
+    /// text selection does not jump to the end of the document; Scribble focus uses the same API
+    /// after a delay, so the window is limited.
+    private var suppressPDFRectNavigationScrollUntil: Date?
 
     func setFormFieldEntryEnabled(_ enabled: Bool) {
         let selector = NSSelectorFromString("setAllowsFormFieldEntry:")
@@ -231,6 +255,40 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             }
         }
         view.subviews.forEach { enableSelectionGestures(in: $0) }
+    }
+
+    /// While a PDF widget text view is first responder:
+    /// - Require **two** fingers to pan the inner scroll view so one-finger drags stay with the field.
+    /// - Set `delaysContentTouches = false` so long-press / loupe / caret placement are not held behind
+    ///   the scroll pan (avoids “System gesture gate timed out” and broken long-press seeking).
+    /// Disabling PDFKit `UILongPressGestureRecognizer`s elsewhere was reverted: it can leave the
+    /// system gesture gate waiting on recognizers we turned off.
+    private func updatePDFScrollInteractionForEmbeddedWidgetTextEditing(_ widgetFocused: Bool) {
+        guard let sv = scrollView else { return }
+        let pan = sv.panGestureRecognizer
+        if widgetFocused {
+            if savedPDFScrollPanMinTouches == nil {
+                savedPDFScrollPanMinTouches = pan.minimumNumberOfTouches
+                savedPDFScrollPanMaxTouches = pan.maximumNumberOfTouches
+                pan.minimumNumberOfTouches = 2
+                pan.maximumNumberOfTouches = 2
+            }
+            if savedPDFScrollDelaysContentTouches == nil {
+                savedPDFScrollDelaysContentTouches = sv.delaysContentTouches
+                sv.delaysContentTouches = false
+            }
+        } else {
+            if let min = savedPDFScrollPanMinTouches, let max = savedPDFScrollPanMaxTouches {
+                pan.minimumNumberOfTouches = min
+                pan.maximumNumberOfTouches = max
+                savedPDFScrollPanMinTouches = nil
+                savedPDFScrollPanMaxTouches = nil
+            }
+            if let savedDelays = savedPDFScrollDelaysContentTouches {
+                sv.delaysContentTouches = savedDelays
+                savedPDFScrollDelaysContentTouches = nil
+            }
+        }
     }
     
     var currentInkColor: UIColor = .systemBlue
@@ -332,7 +390,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private var textBoxStartPoint: CGPoint?
     private var textModeTouchStart: CGPoint?
     private let textBoxOverlayView = UIView()
-    /// Sits above PDF page tiles (below `textBoxOverlayView`) so field highlights show through opaque widget appearances.
+    /// Sits above PDF page tiles (below `textBoxOverlayView`). The tint for the field that is
+    /// actively being edited is omitted; other editable fields stay highlighted.
     private let formFieldHighlightHostView = UIView()
     private let formFieldHighlightLayer = CAShapeLayer()
     var formFieldHighlightFilter: ((PDFFormFieldInfo) -> Bool)?
@@ -446,6 +505,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         }
         
         updateFormFieldHighlights()
+        // PDFKit can install the inner scroll view after the first `syncFormWidgetTextEditingState`;
+        // re-apply two-finger-only scroll when a widget is already first responder.
+        if isFormMode, formTextInputIsFirstResponder(in: self) {
+            updatePDFScrollInteractionForEmbeddedWidgetTextEditing(true)
+        }
         
         if let docView = documentView, inkSelectionOverlayView.superview == nil {
             inkSelectionOverlayView.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.08)
@@ -797,6 +861,19 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         guard isFormMode, let annotation = pdfAnnotation(fromAnnotationHit: notification) else { return }
         guard annotation.type == PDFAnnotationSubtype.widget.rawValue else { return }
         let wt = annotation.widgetFieldType
+        if wt == .text || wt == .choice {
+            // PDFKit often focuses the widget after this notification; disable double-tap
+            // zoom immediately so it does not beat UITextField word-selection gestures.
+            setDoubleTapZoomEnabled(false)
+            scheduleFormWidgetTextSync()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.syncFormWidgetTextEditingState()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.syncFormWidgetTextEditingState()
+            }
+            return
+        }
         guard wt == .button || wt == .signature else { return }
         guard let page = pdfPage(fromAnnotationHit: notification, annotation: annotation),
               let document,
@@ -873,13 +950,42 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         updateFormFieldHighlights()
     }
 
+    /// Resolves the `PDFAnnotation` for the widget whose `UITextField` / `UITextView` is `focused`, using a hit at the control’s center.
+    private func formWidgetAnnotationOwningFirstResponderIfKnown(_ focused: UIView? = nil) -> PDFAnnotation? {
+        guard let focused = focused ?? pdfHostedTextInputWithFocus(in: self) else { return nil }
+        guard focused is UITextField || focused is UITextView else { return nil }
+        let center = CGPoint(x: focused.bounds.midX, y: focused.bounds.midY)
+        let pointInView = convert(center, from: focused)
+        guard let page = page(for: pointInView, nearest: true) else { return nil }
+        let pointInPage = convert(pointInView, to: page)
+        guard let ann = page.annotation(at: pointInPage) else { return nil }
+        let widgetSubtype = PDFAnnotationSubtype.widget.rawValue
+        let looksLikeWidget = ann.type == widgetSubtype
+            || ann.fieldName != nil
+            || !ann.widgetFieldType.rawValue.isEmpty
+        return looksLikeWidget ? ann : nil
+    }
+
     private func updateFormFieldHighlights() {
         guard isFormMode, let document, documentView != nil else {
             formFieldHighlightLayer.isHidden = true
+            formFieldHighlightHostView.isHidden = true
             return
         }
+
+        formFieldHighlightHostView.isHidden = false
         formFieldHighlightLayer.isHidden = false
         formFieldHighlightLayer.frame = formFieldHighlightHostView.bounds
+
+        let focusedInput = pdfHostedTextInputWithFocus(in: self)
+        let excludedAnnotation = formWidgetAnnotationOwningFirstResponderIfKnown(focusedInput)
+        let exclusionRectFallback: CGRect?
+        if focusedInput != nil, excludedAnnotation == nil, let f = focusedInput {
+            exclusionRectFallback = formFieldHighlightHostView.convert(f.bounds, from: f).insetBy(dx: -6, dy: -6)
+        } else {
+            exclusionRectFallback = nil
+        }
+
         let path = UIBezierPath()
         var didFindWidgets = false
         let widgetSubtype = PDFAnnotationSubtype.widget.rawValue
@@ -909,9 +1015,18 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                     shouldHighlight = !isReadOnly && !isAnnotationLocked
                 }
                 guard shouldHighlight else { continue }
-                didFindWidgets = true
+                if let ex = excludedAnnotation, annotation === ex { continue }
                 let rectInView = convert(annotation.bounds, from: page)
                 let rectInHost = formFieldHighlightHostView.convert(rectInView, from: self)
+                if let exRect = exclusionRectFallback {
+                    let inter = rectInHost.intersection(exRect)
+                    let annArea = max(rectInHost.width * rectInHost.height, 1)
+                    let overlapRatio = (inter.width * inter.height) / annArea
+                    if overlapRatio > 0.3 {
+                        continue
+                    }
+                }
+                didFindWidgets = true
                 let rounded = UIBezierPath(roundedRect: rectInHost, cornerRadius: 3)
                 path.append(rounded)
             }
@@ -1111,8 +1226,64 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     
     // MARK: - Build Annotation
     
+    /// Reduces high-frequency jitter in raw touch input using a weighted moving average
+    /// (weights 1:2:1). Endpoints are preserved. Multiple iterations give stronger smoothing.
+    private func denoisedPoints(_ points: [CGPoint], iterations: Int = 3) -> [CGPoint] {
+        guard points.count > 2 else { return points }
+        var result = points
+        for _ in 0..<iterations {
+            var pass = [result[0]]
+            for i in 1..<(result.count - 1) {
+                pass.append(CGPoint(
+                    x: (result[i - 1].x + result[i].x * 2 + result[i + 1].x) / 4,
+                    y: (result[i - 1].y + result[i].y * 2 + result[i + 1].y) / 4
+                ))
+            }
+            pass.append(result[result.count - 1])
+            result = pass
+        }
+        return result
+    }
+
+    /// Builds a smooth UIBezierPath through the given points using Catmull-Rom splines
+    /// (converted to cubic Bézier segments). For 2 points or fewer, falls back to a
+    /// straight line so short taps still render correctly.
+    private func smoothPath(through points: [CGPoint]) -> UIBezierPath {
+        let path = UIBezierPath()
+        guard points.count >= 2 else {
+            if let p = points.first { path.move(to: p) }
+            return path
+        }
+
+        path.move(to: points[0])
+
+        guard points.count > 2 else {
+            path.addLine(to: points[1])
+            return path
+        }
+
+        // Catmull-Rom → cubic Bézier: for each segment i→i+1, the control points are:
+        //   cp1 = points[i]     + (points[i+1] - points[i-1]) / 6
+        //   cp2 = points[i+1]   - (points[i+2] - points[i])   / 6
+        // Boundary: duplicate first/last point so every segment has four neighbours.
+        let n = points.count
+        for i in 0..<(n - 1) {
+            let p0 = points[max(i - 1, 0)]
+            let p1 = points[i]
+            let p2 = points[i + 1]
+            let p3 = points[min(i + 2, n - 1)]
+
+            let cp1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6,
+                              y: p1.y + (p2.y - p0.y) / 6)
+            let cp2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6,
+                              y: p2.y - (p3.y - p1.y) / 6)
+            path.addCurve(to: p2, controlPoint1: cp1, controlPoint2: cp2)
+        }
+        return path
+    }
+
     private func buildInkAnnotation(from points: [CGPoint], color: UIColor, lineWidth: CGFloat) -> PDFAnnotation {
-        
+
         // Handle single point — draw a dot
         let resolvedPoints: [CGPoint]
         if points.count == 1 {
@@ -1121,20 +1292,15 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         } else {
             resolvedPoints = points
         }
-        
-        let path = UIBezierPath()
-        path.move(to: resolvedPoints[0])
-        for point in resolvedPoints.dropFirst() {
-            path.addLine(to: point)
-        }
+
+        let cleanPoints = denoisedPoints(resolvedPoints)
+        let path = smoothPath(through: cleanPoints)
         path.lineWidth = lineWidth
-        
-        // Round caps make strokes look much smoother
         path.lineCapStyle = .round
         path.lineJoinStyle = .round
-        
+
         let bounds = path.bounds.insetBy(dx: -lineWidth * 2, dy: -lineWidth * 2)
-        
+
         let annotation = PDFAnnotation(bounds: bounds, forType: .ink, withProperties: nil)
         annotation.color = color
         annotation.border = PDFBorder()
@@ -1142,24 +1308,17 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         annotation.shouldDisplay = true
         annotation.shouldPrint = true
         annotation.contents = "ink:\(lineWidth)"
-        
-        let shifted = UIBezierPath()
-        shifted.move(to: CGPoint(
-            x: resolvedPoints[0].x - bounds.origin.x,
-            y: resolvedPoints[0].y - bounds.origin.y
-        ))
-        for point in resolvedPoints.dropFirst() {
-            shifted.addLine(to: CGPoint(
-                x: point.x - bounds.origin.x,
-                y: point.y - bounds.origin.y
-            ))
-        }
+
+        // Rebuild the path in annotation-local coordinates
+        let offset = bounds.origin
+        let shiftedPoints = cleanPoints.map { CGPoint(x: $0.x - offset.x, y: $0.y - offset.y) }
+        let shifted = smoothPath(through: shiftedPoints)
         shifted.lineWidth = lineWidth
         shifted.lineCapStyle = .round
         shifted.lineJoinStyle = .round
-        
+
         annotation.add(shifted)
-        
+
         return annotation
     }
     
@@ -2083,10 +2242,39 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             object: self
         )
     }
+
+    /// Enables or disables PDFKit's internal double-tap-to-zoom gesture recognizers.
+    /// Called when form field text editing begins/ends so word-selection double-tap
+    /// is not hijacked by zoom while the user is typing in a field.
+    private func setDoubleTapZoomEnabled(_ enabled: Bool) {
+        // PDFKit registers its zoom double-tap on the PDFView itself
+        gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .filter { $0 !== inkSelectTapGesture && $0 !== formPencilTapGesture && $0.numberOfTapsRequired == 2 }
+            .forEach { $0.isEnabled = enabled }
+
+        // Belt-and-suspenders: also check the internal scroll view
+        scrollView?.gestureRecognizers?
+            .compactMap { $0 as? UITapGestureRecognizer }
+            .filter { $0.numberOfTapsRequired == 2 }
+            .forEach { $0.isEnabled = enabled }
+    }
     
     @objc private func handleTextSelectionChanged() {
+        // When a widget is focused, a non-empty PDF *document* `currentSelection` can steal first
+        // responder from the widget. Only clear in that case — avoid calling `clearSelection()`
+        // on every notification (including empty), which can disrupt UITextView selection gestures.
+        if isFormMode && formTextInputIsFirstResponder(in: self) {
+            let hadDocSel = currentSelection != nil && !(currentSelection?.string?.isEmpty ?? true)
+            if hadDocSel {
+                clearSelection()
+            }
+        }
         let hasSelection = currentSelection != nil && !(currentSelection?.string?.isEmpty ?? true)
         formViewModel?.hasTextSelection = hasSelection
+        if isFormMode && !isFormFieldTextActive {
+            suppressPDFRectNavigationScrollUntil = Date().addingTimeInterval(0.45)
+        }
     }
     
     @objc private func handlePageChanged() {
@@ -2248,10 +2436,77 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             name: UIResponder.keyboardDidChangeFrameNotification,
             object: nil
         )
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextField.textDidBeginEditingNotification, object: nil)
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextField.textDidEndEditingNotification, object: nil)
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextView.textDidBeginEditingNotification, object: nil)
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextView.textDidEndEditingNotification, object: nil)
+    }
+
+    /// PDFKit embeds widget editing in `UITextField` / `UITextView` subviews.
+    private func formTextInputIsFirstResponder(in view: UIView) -> Bool {
+        pdfHostedTextInputWithFocus(in: view) != nil
+    }
+
+    /// The focused PDF widget text control under `view`, if any (e.g. `PDFTextWidgetTextView`).
+    private func pdfHostedTextInputWithFocus(in view: UIView) -> UIView? {
+        if (view is UITextField || view is UITextView), view.isFirstResponder { return view }
+        for sub in view.subviews {
+            if let found = pdfHostedTextInputWithFocus(in: sub) { return found }
+        }
+        return nil
+    }
+
+    private func syncFormWidgetTextEditingState() {
+        guard isFormMode else {
+            updatePDFScrollInteractionForEmbeddedWidgetTextEditing(false)
+            if isFormFieldTextActive {
+                isFormFieldTextActive = false
+            }
+            if !isDrawingMode && !isTextMode {
+                setDoubleTapZoomEnabled(true)
+            }
+            return
+        }
+        setDoubleTapZoomEnabled(false)
+        let active = formTextInputIsFirstResponder(in: self)
+        if active != isFormFieldTextActive {
+            isFormFieldTextActive = active
+        }
+        updatePDFScrollInteractionForEmbeddedWidgetTextEditing(active)
+        updateFormFieldHighlights()
+    }
+
+    /// Coalesces `textDidEnd` → `textDidBegin` on field switches so we don't briefly re-enable PDF double-tap zoom.
+    private func scheduleFormWidgetTextSync() {
+        guard isFormMode else { return }
+        guard !formWidgetTextSyncScheduled else { return }
+        formWidgetTextSyncScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.formWidgetTextSyncScheduled = false
+            self.syncFormWidgetTextEditingState()
+        }
+    }
+
+    @objc private func formHostedTextInputEditingChanged(_ notification: Notification) {
+        guard isFormMode else { return }
+        guard let view = notification.object as? UIView, view.isDescendant(of: self) else { return }
+        // Overlay text boxes live under `textBoxOverlayView`; ignore them whenever they could receive events.
+        if view.isDescendant(of: textBoxOverlayView) { return }
+        scheduleFormWidgetTextSync()
     }
     
     @objc private func keyboardWillShow(_ notification: Notification) {
         captureFormFieldStates()
+
+        // First responder on a PDF widget may lag the keyboard; resync after layout.
+        if isFormMode {
+            syncFormWidgetTextEditingState()
+            DispatchQueue.main.async { [weak self] in
+                self?.syncFormWidgetTextEditingState()
+            }
+        }
 
         // Preserve scroll position when editing an overlay text box
         if selectedTextBoxID != nil, let sv = scrollView {
@@ -2263,6 +2518,14 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         recordFormFieldChanges()
         formFieldStates.removeAll()
         savedTextBoxContentOffset = nil
+
+        // Keyboard can hide while a widget stays first responder (e.g. iPad); re-sync from the view tree.
+        if isFormMode {
+            syncFormWidgetTextEditingState()
+            DispatchQueue.main.async { [weak self] in
+                self?.syncFormWidgetTextEditingState()
+            }
+        }
     }
 
     @objc private func keyboardDidChangeFrame(_ notification: Notification) {
@@ -2371,14 +2634,68 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     override func go(to rect: CGRect, on page: PDFPage) {
         if shouldInterceptAllTouches || suppressGoTo { return }
-        super.go(to: rect, on: page)
+        let pinRectNavigation = isFormMode
+            && !isFormFieldTextActive
+            && ((suppressPDFRectNavigationScrollUntil.map { Date() < $0 }) ?? false)
+        if pinRectNavigation {
+            pinScrollOffsetWhileInvokingSelectionScroll { super.go(to: rect, on: page) }
+        } else {
+            super.go(to: rect, on: page)
+        }
+    }
+
+    /// PDFKit often moves the inner scroll view when selections change; pin the offset
+    /// across immediate and deferred layout so continuous multi-page PDFs do not jump.
+    private func pinScrollOffsetWhileInvokingSelectionScroll(_ invoke: () -> Void) {
+        guard let sv = scrollView else {
+            invoke()
+            return
+        }
+        let pinned = sv.contentOffset
+        invoke()
+        func restorePinnedOffset() {
+            guard let sv = scrollView else { return }
+            if sv.contentOffset != pinned {
+                sv.setContentOffset(pinned, animated: false)
+            }
+        }
+        restorePinnedOffset()
+        DispatchQueue.main.async(execute: restorePinnedOffset)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: restorePinnedOffset)
+    }
+
+    override func go(to selection: PDFSelection) {
+        if isFormFieldTextActive {
+            super.go(to: selection)
+            return
+        }
+        pinScrollOffsetWhileInvokingSelectionScroll { super.go(to: selection) }
+    }
+
+    /// Selection updates often call this instead of (or in addition to) `go(to: PDFSelection)`.
+    override func scrollSelectionToVisible(_ sender: Any?) {
+        if isFormFieldTextActive {
+            super.scrollSelectionToVisible(sender)
+            return
+        }
+        pinScrollOffsetWhileInvokingSelectionScroll { super.scrollSelectionToVisible(sender) }
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard shouldInterceptAllTouches || suppressGoTo else {
-            return super.hitTest(point, with: event)
+        if shouldInterceptAllTouches || suppressGoTo {
+            return self
         }
-        return self
+        // `PDFDocumentView` can win `hitTest` over a focused `PDFTextWidgetTextView`, so taps do
+        // not reach `UITextInteraction`. Prefer the first-responder widget inside a slightly
+        // expanded bounds for near-edge taps.
+        if isFormMode, let widgetText = pdfHostedTextInputWithFocus(in: self) {
+            let pInWidget = convert(point, to: widgetText)
+            let targetRect = widgetText.bounds.insetBy(dx: -14, dy: -14)
+            if targetRect.contains(pInWidget) {
+                return widgetText.hitTest(pInWidget, with: event) ?? widgetText
+            }
+        }
+        return super.hitTest(point, with: event)
     }
 
     override func gestureRecognizer(

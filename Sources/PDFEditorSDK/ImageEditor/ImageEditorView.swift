@@ -817,6 +817,24 @@ final class InkCanvasView: UIView {
         isOpaque = false
     }
 
+    /// Weighted moving average (1:2:1) applied `iterations` times to reduce touch jitter.
+    private func denoisedPoints(_ points: [CGPoint], iterations: Int = 3) -> [CGPoint] {
+        guard points.count > 2 else { return points }
+        var result = points
+        for _ in 0..<iterations {
+            var pass = [result[0]]
+            for i in 1..<(result.count - 1) {
+                pass.append(CGPoint(
+                    x: (result[i - 1].x + result[i].x * 2 + result[i + 1].x) / 4,
+                    y: (result[i - 1].y + result[i].y * 2 + result[i + 1].y) / 4
+                ))
+            }
+            pass.append(result[result.count - 1])
+            result = pass
+        }
+        return result
+    }
+
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         isOpaque = false
@@ -845,9 +863,24 @@ final class InkCanvasView: UIView {
             context.setLineCap(.round)
             context.setLineJoin(.round)
             context.beginPath()
-            context.move(to: stroke.points[0])
-            for point in stroke.points.dropFirst() {
-                context.addLine(to: point)
+            let pts = denoisedPoints(stroke.points)
+            let n = pts.count
+            context.move(to: pts[0])
+            if n == 2 {
+                context.addLine(to: pts[1])
+            } else {
+                // Catmull-Rom → cubic Bézier smoothing
+                for i in 0..<(n - 1) {
+                    let p0 = pts[max(i - 1, 0)]
+                    let p1 = pts[i]
+                    let p2 = pts[i + 1]
+                    let p3 = pts[min(i + 2, n - 1)]
+                    let cp1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6,
+                                      y: p1.y + (p2.y - p0.y) / 6)
+                    let cp2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6,
+                                      y: p2.y - (p3.y - p1.y) / 6)
+                    context.addCurve(to: p2, control1: cp1, control2: cp2)
+                }
             }
             context.strokePath()
         }

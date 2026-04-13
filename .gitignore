@@ -3,6 +3,9 @@
 .swiftpm/
 Package.resolved
 
+# Cursor IDE
+.cursor/
+
 # macOS
 .DS_Store
 
