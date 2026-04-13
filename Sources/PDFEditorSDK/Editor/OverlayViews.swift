@@ -140,6 +140,11 @@ final class TextBoxView: UIView, UITextViewDelegate {
     func setTextColor(_ color: UIColor) {
         textView.textColor = color
     }
+
+    /// When `false`, Apple Pencil Scribble will not target this text view (drawing/erase/etc. should win).
+    func setTextInputScribbleEnabled(_ enabled: Bool) {
+        textView.isScribbleEnabled = enabled
+    }
     
     func beginEditing() {
         textView.becomeFirstResponder()

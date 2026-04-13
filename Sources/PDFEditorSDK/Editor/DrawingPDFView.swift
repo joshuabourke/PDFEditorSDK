@@ -300,6 +300,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             // the gesture if draw mode is still on, and hide the eraser circle.
             pencilDrawingGesture?.isEnabled = isDrawingMode || isEraserMode
             if !isEraserMode { hideEraserCircle() }
+            syncScribbleInteraction()
             updateNavigationGestureState()
         }
     }
@@ -425,6 +426,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             } else {
                 pencilKitManager.deactivate()
             }
+            syncScribbleInteraction()
         }
     }
 
@@ -1571,6 +1573,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         textBoxOverlayView.addSubview(box)
         textBoxOverlayView.bringSubviewToFront(box)
         textBoxViews[state.id] = box
+        syncScribbleInteraction()
         if beginEditing {
             box.beginEditing()
         }
@@ -2203,23 +2206,34 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         scribbleInteraction = interaction
     }
 
-    /// Single source of truth for whether the scribble interaction should be
-    /// active. Scribble is only useful in form-filling mode; in every other
-    /// active tool mode the pencil is driving gestures (drawing, selecting,
-    /// moving overlays, placing shapes) and the interaction would intercept
-    /// those touches before the gesture recognisers can respond.
+    /// Single source of truth for Scribble on the PDF surface and on overlay text boxes.
+    /// `UIIndirectScribbleInteraction` on this view is only useful in form-filling mode; in every
+    /// other active tool mode the pencil is driving gestures (drawing, selecting, moving overlays,
+    /// placing shapes, PencilKit) and that interaction would intercept touches before gestures run.
     ///
-    /// UITextView handles Scribble natively via its own UITextInteraction, so
-    /// text boxes receive pencil-written text automatically whenever they are
-    /// first-responder — no extra wiring is needed here for that case.
+    /// Overlay `TextBoxView` embeds a `UITextView`, which still participates in Scribble unless
+    /// `isScribbleEnabled` is turned off while those tools are active (see `syncOverlayTextViewsScribbleEnabled`).
+    /// When no such tool is active, Scribble on those text views stays enabled for handwriting input.
     private func syncScribbleInteraction() {
-        guard let scribble = scribbleInteraction else { return }
-        let shouldEnable = !isDrawingMode && !isTextMode && !isSelectMode && !isShapeMode
-        let isAdded = interactions.contains { $0 === scribble }
-        if shouldEnable && !isAdded {
-            addInteraction(scribble)
-        } else if !shouldEnable && isAdded {
-            removeInteraction(scribble)
+        if let scribble = scribbleInteraction {
+            let shouldEnable = !isDrawingMode && !isEraserMode && !isTextMode && !isSelectMode && !isShapeMode && !isPencilKitMode
+            let isAdded = interactions.contains { $0 === scribble }
+            if shouldEnable && !isAdded {
+                addInteraction(scribble)
+            } else if !shouldEnable && isAdded {
+                removeInteraction(scribble)
+            }
+        }
+        syncOverlayTextViewsScribbleEnabled()
+    }
+
+    /// Overlay text boxes use `UITextView`, which participates in Scribble by default. While any
+    /// tool is routing the pencil to the canvas (draw, erase, PencilKit, shapes, etc.), disable
+    /// Scribble on those views so strokes near an existing box are not captured as handwriting input.
+    private func syncOverlayTextViewsScribbleEnabled() {
+        let scribbleAllowedOnTextOverlays = !isDrawingMode && !isEraserMode && !isTextMode && !isSelectMode && !isShapeMode && !isPencilKitMode
+        for box in textBoxViews.values {
+            box.setTextInputScribbleEnabled(scribbleAllowedOnTextOverlays)
         }
     }
 
