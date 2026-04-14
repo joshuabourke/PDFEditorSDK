@@ -59,6 +59,16 @@ class ImageEditorViewModel {
     var pencilOnlyAnnotations: Bool {
         didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; preferences.save() }
     }
+    var pencilDoubleTapAction: PencilGestureAction {
+        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; preferences.save() }
+    }
+    var pencilSqueezeAction: PencilGestureAction {
+        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; preferences.save() }
+    }
+    var pencilDoubleSqueezeAction: PencilGestureAction {
+        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+    }
+    var previousTool: EditorTool? = nil
 
     var hasSelectedOverlayObject: Bool = false
     var showImageSourceDialog: Bool = false
@@ -107,22 +117,28 @@ class ImageEditorViewModel {
 
         self.drawWithFinger = prefs.drawWithFinger
         self.pencilOnlyAnnotations = prefs.pencilOnlyAnnotations
+        self.pencilDoubleTapAction     = prefs.pencilDoubleTapAction
+        self.pencilSqueezeAction       = prefs.pencilSqueezeAction
+        self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
     }
 
     func setTool(_ tool: EditorTool) {
         // Tapping an already-active tool returns to select mode
         if activeTool == tool, tool != .select {
+            previousTool = activeTool
             activeTool = .select
             canvasView?.endTextEditing()
             return
         }
         if tool == .shape {
+            previousTool = activeTool
             activeTool = .shape
             canvasView?.endTextEditing()
             canvasView?.deselectAll()
             return
         }
         if tool == .pencilKit {
+            previousTool = activeTool
             activeTool = .pencilKit
             canvasView?.endTextEditing()
             canvasView?.deselectAll()
@@ -131,6 +147,7 @@ class ImageEditorViewModel {
         if tool != .text {
             canvasView?.endTextEditing()
         }
+        previousTool = activeTool
         activeTool = tool
         if tool != .select {
             canvasView?.deselectAll()
@@ -315,6 +332,9 @@ class ImageEditorViewModel {
         }
     }
 }
+
+// MARK: - PencilGestureHandler Conformance
+extension ImageEditorViewModel: PencilGestureHandler {}
 
 // MARK: - ImageUndoAction
 

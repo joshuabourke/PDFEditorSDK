@@ -19,6 +19,11 @@ struct EditorPreferences: Codable {
     // Input Mode
     var drawWithFinger: Bool = false
     var pencilOnlyAnnotations: Bool = false
+
+    // Pencil Gestures
+    var pencilDoubleTapAction: PencilGestureAction    = .toggleEraser
+    var pencilSqueezeAction: PencilGestureAction      = .noAction
+    var pencilDoubleSqueezeAction: PencilGestureAction = .noAction
     
     //Text
     var textBoxFontSize: CGFloat = 14

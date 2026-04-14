@@ -576,7 +576,10 @@ struct PDFFormEditorView: View {
                         .popover(isPresented: $showEditorSettings, arrowEdge: .top) {
                             EditorSettingsView(
                                 drawWithFinger: $viewModel.drawWithFinger,
-                                pencilOnlyAnnotations: $viewModel.pencilOnlyAnnotations
+                                pencilOnlyAnnotations: $viewModel.pencilOnlyAnnotations,
+                                pencilDoubleTapAction: $viewModel.pencilDoubleTapAction,
+                                pencilSqueezeAction: $viewModel.pencilSqueezeAction,
+                                pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction
                             )
                         }
                     }

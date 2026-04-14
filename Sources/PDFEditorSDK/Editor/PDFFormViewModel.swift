@@ -67,6 +67,16 @@ class PDFFormViewModel {
     var pencilOnlyAnnotations: Bool {
         didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; preferences.save() }
     }
+    var pencilDoubleTapAction: PencilGestureAction {
+        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; preferences.save() }
+    }
+    var pencilSqueezeAction: PencilGestureAction {
+        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; preferences.save() }
+    }
+    var pencilDoubleSqueezeAction: PencilGestureAction {
+        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+    }
+    var previousTool: EditorTool? = nil
     var isThumbnailOverlayVisible: Bool = true
     var saveStatus: String?
     var exportStatus: String?
@@ -120,6 +130,9 @@ class PDFFormViewModel {
 
         self.drawWithFinger = prefs.drawWithFinger
         self.pencilOnlyAnnotations = prefs.pencilOnlyAnnotations
+        self.pencilDoubleTapAction = prefs.pencilDoubleTapAction
+        self.pencilSqueezeAction = prefs.pencilSqueezeAction
+        self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
 
         _ = loadPDF(from: documentURL)
         
@@ -151,18 +164,21 @@ class PDFFormViewModel {
     func setTool(_ tool: EditorTool) {
         // Tapping an already-active tool returns to select mode
         if activeTool == tool, tool != .select {
+            previousTool = activeTool
             activeTool = .select
             pdfView?.endOverlayTextEditing()
 
             return
         }
         if tool == .shape {
+            previousTool = activeTool
             activeTool = .shape
             pdfView?.endOverlayTextEditing()
 
             return
         }
         if tool == .pencilKit {
+            previousTool = activeTool
             activeTool = .pencilKit
             pdfView?.endOverlayTextEditing()
             return
@@ -170,6 +186,7 @@ class PDFFormViewModel {
         if tool != .text {
             pdfView?.endOverlayTextEditing()
         }
+        previousTool = activeTool
         activeTool = tool
         if tool != .select {
             hasSelectedInkAnnotation = false
@@ -830,3 +847,6 @@ class PDFFormViewModel {
         return info
     }
 }
+
+// MARK: - PencilGestureHandler Conformance
+extension PDFFormViewModel: PencilGestureHandler {}

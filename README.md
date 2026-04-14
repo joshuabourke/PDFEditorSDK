@@ -1,6 +1,6 @@
 # PDFEditorSDK
 
-`PDFEditorSDK` is a SwiftUI-first PDF and image editing SDK for iOS, built with native UIKit rendering, full Apple Pencil support, and a clean long-press toolbar designed for touch and stylus workflows.
+`PDFEditorSDK` is a SwiftUI-first PDF and image editing SDK for iOS, built with native UIKit rendering, full Apple Pencil support, configurable Pencil gesture mapping, and a clean long-press toolbar designed for touch and stylus workflows.
 
 ---
 
@@ -70,7 +70,8 @@ Sources/PDFEditorSDK/
 - **Select mode** — tap to select any overlay, drag to move, orange handle to resize, delete from toolbar
 - **Pencil-only annotation mode** — restrict all annotation tools (draw, erase, shape, text) to Apple Pencil; finger scrolls and zooms freely
 - **Draw with Finger mode** — single finger draws ink strokes; two fingers scroll
-- **Tool settings persistence** — colour, line weight, shape type, font size, and input mode settings are remembered between sessions
+- **Apple Pencil gesture mapping** — assign custom actions to double-tap (Pencil 2 and Pro) and squeeze gestures (Pencil Pro); see [Apple Pencil Gestures](#apple-pencil-gestures)
+- **Tool settings persistence** — colour, line weight, shape type, font size, input mode, and gesture assignments are remembered between sessions
 - **2-finger navigation** — scroll and pinch-to-zoom in every non-pencil-only annotation mode
 - **Page management** — add blank pages or remove the current page, with full undo/redo
 - Saves an editable PDF locally by embedding overlay metadata back into the document
@@ -164,6 +165,54 @@ The toolbar uses a **tap + long-press** interaction model:
 |---|---|
 | **Pencil Only** | All annotation tools respond only to Apple Pencil. Finger touches scroll and zoom the document freely. |
 | **Draw with Finger** | Single finger draws ink strokes. Two fingers scroll and zoom. Mutually exclusive with Pencil Only. |
+| **Double Tap** | Action performed when the user double-taps the flat side of Apple Pencil 2 or Pro. Defaults to Toggle Eraser. |
+| **Single Squeeze** | Action performed on a single squeeze of Apple Pencil Pro. Defaults to None. |
+| **Double Squeeze** | Action performed on two quick squeezes of Apple Pencil Pro. Defaults to None. |
+
+---
+
+## Apple Pencil Gestures
+
+Both the PDF Editor and Image Editor support configurable hardware gestures for compatible Apple Pencil models. Gesture assignments are shared between both editors and persisted to `UserDefaults` — users only need to configure them once.
+
+### Supported hardware
+
+| Gesture | Hardware |
+|---|---|
+| **Double Tap** | Apple Pencil 2, Apple Pencil Pro |
+| **Single Squeeze** | Apple Pencil Pro |
+| **Double Squeeze** | Apple Pencil Pro |
+
+> Apple Pencil (1st generation) and Apple Pencil USB-C do not support any of these gestures. The settings remain visible in the UI so users can configure them in advance, but they will not fire on unsupported hardware.
+
+### Assignable actions
+
+Each gesture can be independently mapped to any of the following actions:
+
+| Action | Description |
+|---|---|
+| **None** | The gesture does nothing. Multiple gestures may all be set to None. |
+| **Toggle Eraser** | Switches between the Eraser tool and the Draw tool. Tap again to return. This mirrors the classic Apple Pencil double-tap convention. |
+| **Select Tool** | Activates the Select tool. |
+| **Draw Tool** | Activates the Draw (ink) tool. |
+| **Eraser Tool** | Activates the Eraser tool directly, without toggling. |
+| **Text Tool** | Activates the Text overlay tool. |
+| **Shape Tool** | Activates the Shape tool using the last-used shape type. |
+| **Switch to Last Tool** | Returns to whichever tool was active before the most recent tool change — useful for quickly flipping between two tools without gesture cycling. |
+| **Undo** | Undoes the most recent action, equivalent to the toolbar Undo button. |
+| **Redo** | Redoes the most recently undone action. |
+
+### Conflict prevention
+
+Each action (except None) can only be assigned to one gesture at a time. If you assign an action that is already claimed by another gesture, the previous assignment is automatically cleared. Actions already in use by another gesture are marked **(in use)** in the picker so you can see the conflict before committing.
+
+### Configuring gestures
+
+Open the **Settings** popover from the toolbar (gear icon) and scroll to the **Pencil Gestures** section. Each gesture has its own menu picker. Changes take effect immediately and are saved automatically.
+
+### How double squeeze works
+
+Apple's API does not expose a native double-squeeze event. The SDK implements it with a short timing window: if a second squeeze ends within 400 ms of the first, it is treated as a double squeeze and the single-squeeze action is suppressed. Squeezes separated by more than 400 ms each fire as independent single squeezes.
 
 ---
 
@@ -224,6 +273,7 @@ PDFEditorView(
 - **Select mode** — tap to select any overlay, drag to move, resize, delete; configure image borders inline
 - **Pencil-only annotation mode** — all annotation tools respond only to Apple Pencil; finger navigates freely
 - **Draw with Finger mode** — single finger draws; two fingers scroll
+- **Apple Pencil gesture mapping** — same configurable double-tap and squeeze actions as the PDF editor; shared settings apply to both
 - **Tool settings persistence** — all settings are remembered between sessions
 - All drawing and overlays are constrained to the image content area
 - Full undo / redo (up to 50 steps)
@@ -285,11 +335,23 @@ ImageEditorView(imageData: imageData) { exportedImage in
 | **Shape** | Draw the last-used shape type. | Shape picker, stroke colour, line weight |
 | **Image** | Add a photo from Camera or Photo Library. | — |
 | **Pencil** | Activate native PencilKit mode. | — |
-| **Settings** | Open the input-mode settings popover (Pencil Only / Draw with Finger). | — |
+| **Settings** | Open the input-mode and Pencil Gestures settings popover. | — |
 
 ---
 
 ## Changelog
+
+### v2.1.0
+
+- **Apple Pencil gesture mapping** — users can now assign custom actions to Apple Pencil hardware gestures directly from the Settings popover in both the PDF Editor and Image Editor. Three gestures are supported: **Double Tap** (Pencil 2 and Pro), **Single Squeeze** (Pencil Pro), and **Double Squeeze** (Pencil Pro). Each gesture can be independently mapped to Toggle Eraser, Switch to Last Tool, Select, Draw, Eraser, Text, Shape, Undo, Redo, or None.
+
+- **Tool switching via gesture** — the new gesture actions include direct activation of Select, Draw, Eraser, Text, and Shape tools, plus a Switch to Last Tool action that returns to the previously active tool. Combined with Toggle Eraser this gives Pencil users fast one-handed tool swapping without touching the toolbar.
+
+- **Conflict prevention** — each action (except None) can only be assigned to one gesture at a time. Assigning an action that is already used by another gesture automatically clears the previous assignment. Actions already in use are labelled **(in use)** in the picker.
+
+- **Gesture settings persistence** — all three gesture assignments are saved to `UserDefaults` alongside existing tool preferences and restored automatically on next launch. Defaults: Double Tap → Toggle Eraser, Single Squeeze → None, Double Squeeze → None.
+
+---
 
 ### v2.0.0
 
