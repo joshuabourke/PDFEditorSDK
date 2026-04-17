@@ -46,6 +46,12 @@ class PDFFormViewModel {
     var textBoxTextColor: UIColor {
         didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); preferences.save()}
     }
+    var textBoxTextAlignment: NSTextAlignment {
+        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; preferences.save()}
+    }
+    var textBoxVerticalAlignment: TextVerticalAlignment {
+        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
+    }
     var activeShapeKind: OverlayShapeKind {
         didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
     }
@@ -120,7 +126,9 @@ class PDFFormViewModel {
         self.textBoxFontSize = prefs.textBoxFontSize
         self.textBoxIsBold = prefs.textBoxIsBold
         self.textBoxTextColor = prefs.textBoxTextColor.uiColor
-        
+        self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
+        self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
+
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeStrokeColor = prefs.shapeStrokeColor.uiColor
         self.shapeLineWidth = prefs.shapeLineWidth
@@ -174,13 +182,18 @@ class PDFFormViewModel {
             previousTool = activeTool
             activeTool = .shape
             pdfView?.endOverlayTextEditing()
-
+            hasSelectedInkAnnotation = false
+            pdfView?.deselectInkAnnotation()
+            pdfView?.deselectOverlaySelection()
             return
         }
         if tool == .pencilKit {
             previousTool = activeTool
             activeTool = .pencilKit
             pdfView?.endOverlayTextEditing()
+            hasSelectedInkAnnotation = false
+            pdfView?.deselectInkAnnotation()
+            pdfView?.deselectOverlaySelection()
             return
         }
         if tool != .text {
@@ -191,6 +204,7 @@ class PDFFormViewModel {
         if tool != .select {
             hasSelectedInkAnnotation = false
             pdfView?.deselectInkAnnotation()
+            pdfView?.deselectOverlaySelection()
         }
     }
 
@@ -268,7 +282,9 @@ class PDFFormViewModel {
             fontSize: textBoxFontSize,
             isBold: textBoxIsBold,
             textColor: textBoxTextColor,
-            backgroundColor: textBoxBackgroundColor
+            backgroundColor: textBoxBackgroundColor,
+            textAlignment: textBoxTextAlignment,
+            verticalAlignment: textBoxVerticalAlignment
         )
     }
     
@@ -634,6 +650,8 @@ class PDFFormViewModel {
                             fontSize: item.fontSize ?? 14,
                             isBold: item.isBold ?? false,
                             textColor: (item.textColor?.uiColor) ?? .label,
+                            textAlignment: NSTextAlignment(rawValue: item.textAlignment ?? 0) ?? .left,
+                            verticalAlignment: TextVerticalAlignment(rawValue: item.verticalAlignment ?? "") ?? .top,
                             context: cg
                         )
                     }
@@ -701,9 +719,9 @@ class PDFFormViewModel {
         }
     }
     
-    private func drawText(_ text: String, in rect: CGRect, fontSize: CGFloat, isBold: Bool, textColor: UIColor, context: CGContext) {
+    private func drawText(_ text: String, in rect: CGRect, fontSize: CGFloat, isBold: Bool, textColor: UIColor, textAlignment: NSTextAlignment = .left, verticalAlignment: TextVerticalAlignment = .top, context: CGContext) {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .left
+        paragraph.alignment = textAlignment
         paragraph.lineBreakMode = .byWordWrapping
         let font = isBold ? UIFont.boldSystemFont(ofSize: fontSize) : UIFont.systemFont(ofSize: fontSize)
         let attributes: [NSAttributedString.Key: Any] = [
@@ -712,10 +730,27 @@ class PDFFormViewModel {
             .paragraphStyle: paragraph
         ]
         let attributed = NSAttributedString(string: text, attributes: attributes)
-        
-        context.saveGState()
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
-        let path = CGPath(rect: rect, transform: nil)
+
+        // Offset the draw rect for middle/bottom vertical alignment.
+        var drawRect = rect
+        if verticalAlignment != .top {
+            let constraints = CGSize(width: rect.width, height: .greatestFiniteMagnitude)
+            let suggested = CTFramesetterSuggestFrameSizeWithConstraints(framesetter, CFRangeMake(0, 0), nil, constraints, nil)
+            let textHeight = min(suggested.height, rect.height)
+            switch verticalAlignment {
+            case .top: break
+            case .middle:
+                let offset = max(0, (rect.height - textHeight) / 2)
+                drawRect = CGRect(x: rect.minX, y: rect.minY + offset, width: rect.width, height: rect.height - offset)
+            case .bottom:
+                let offset = max(0, rect.height - textHeight)
+                drawRect = CGRect(x: rect.minX, y: rect.minY + offset, width: rect.width, height: rect.height - offset)
+            }
+        }
+
+        context.saveGState()
+        let path = CGPath(rect: drawRect, transform: nil)
         let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, attributed.length), path, nil)
         CTFrameDraw(frame, context)
         context.restoreGState()

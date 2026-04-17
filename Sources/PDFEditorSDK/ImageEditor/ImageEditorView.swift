@@ -59,6 +59,7 @@ struct ImageFormEditorView: View {
     @State private var showTextOptions = false
     @State private var showShapeOptions = false
     @State private var showEraserOptions = false
+    @State private var showImageBorderOptions = false
 
     var body: some View {
         VStack {
@@ -120,24 +121,7 @@ struct ImageFormEditorView: View {
                 }
             }
         }
-        .confirmationDialog(
-            "Add Image",
-            isPresented: $viewModel.showImageSourceDialog,
-            titleVisibility: .visible
-        ) {
-            Button("Camera") {
-                imagePickerSource = .camera
-                isShowingImagePicker = true
-            }
-            Button("Photo Library") {
-                imagePickerSource = .photoLibrary
-                isShowingImagePicker = true
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Choose a source for the image.")
-        }
-        .sheet(isPresented: $isShowingImagePicker) {
+        .fullScreenCover(isPresented: $isShowingImagePicker) {
             ImagePicker(sourceType: imagePickerSource.uiSourceType, allowsEditing: true) { image in
                 if let image {
                     viewModel.addOverlayImage(image)
@@ -158,6 +142,12 @@ struct ImageFormEditorView: View {
             viewModel.applyTextStyleToSelected()
         }
         .onChange(of: viewModel.textBoxIsBold) { _, _ in
+            viewModel.applyTextStyleToSelected()
+        }
+        .onChange(of: viewModel.textBoxTextAlignment) { _, _ in
+            viewModel.applyTextStyleToSelected()
+        }
+        .onChange(of: viewModel.textBoxVerticalAlignment) { _, _ in
             viewModel.applyTextStyleToSelected()
         }
         .onChange(of: viewModel.textBoxTextColor) { _, _ in
@@ -319,7 +309,9 @@ struct ImageFormEditorView: View {
                                     set: { viewModel.textBoxBackgroundColor = UIColor($0) }
                                 ),
                                 fontSize: $viewModel.textBoxFontSize,
-                                isBold: $viewModel.textBoxIsBold
+                                isBold: $viewModel.textBoxIsBold,
+                                textAlignment: $viewModel.textBoxTextAlignment,
+                                verticalAlignment: $viewModel.textBoxVerticalAlignment
                             )
                         }
                     }
@@ -332,27 +324,57 @@ struct ImageFormEditorView: View {
                     toolbarDivider
 
                     // MARK: Image Section
-                    VStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Image")
                             .font(.caption2)
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack {
-                            Button {
-                                viewModel.showImageSourceDialog = true
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "photo.on.rectangle")
-                                        .fontWeight(.semibold)
-                                    Text("Image")
-                                        .fontWeight(.semibold)
+                        VStack(spacing: 4) {
+                            Image(systemName: "photo.on.rectangle")
+                                .fontWeight(.semibold)
+                            Text("Image")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    showImageBorderOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    viewModel.showImageSourceDialog = true
                                 }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                            )
+                        )
+                        .popover(isPresented: $showImageBorderOptions, arrowEdge: .top) {
+                            ImageBorderToolOptionsView(
+                                borderWidth: $viewModel.imageBorderWidth,
+                                borderColor: Binding(
+                                    get: { Color(viewModel.imageBorderColor) },
+                                    set: { viewModel.imageBorderColor = UIColor($0) }
+                                )
+                            )
+                        }
+                        .confirmationDialog(
+                            "Add Image",
+                            isPresented: $viewModel.showImageSourceDialog,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Camera") {
+                                imagePickerSource = .camera
+                                isShowingImagePicker = true
                             }
-                            .buttonStyle(.plain)
+                            Button("Photo Library") {
+                                imagePickerSource = .photoLibrary
+                                isShowingImagePicker = true
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Choose a source for the image.")
                         }
                     }
 
@@ -619,6 +641,70 @@ struct ImageFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
             }
             .buttonStyle(.plain)
+            Menu {
+                Button {
+                    viewModel.textBoxTextAlignment = .left
+                } label: {
+                    Label("Leading", systemImage: "text.alignleft")
+                }
+                Button {
+                    viewModel.textBoxTextAlignment = .center
+                } label: {
+                    Label("Center", systemImage: "text.aligncenter")
+                }
+                Button {
+                    viewModel.textBoxTextAlignment = .right
+                } label: {
+                    Label("Trailing", systemImage: "text.alignright")
+                }
+            } label: {
+                toolbarChip {
+                    Image(systemName: imageAlignmentIcon(for: viewModel.textBoxTextAlignment))
+                        .font(.title3).fontWeight(.semibold)
+                    Text("Align").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button {
+                    viewModel.textBoxVerticalAlignment = .top
+                } label: {
+                    Label("Top", systemImage: "arrow.up.to.line")
+                }
+                Button {
+                    viewModel.textBoxVerticalAlignment = .middle
+                } label: {
+                    Label("Middle", systemImage: "arrow.up.and.down")
+                }
+                Button {
+                    viewModel.textBoxVerticalAlignment = .bottom
+                } label: {
+                    Label("Bottom", systemImage: "arrow.down.to.line")
+                }
+            } label: {
+                toolbarChip {
+                    Image(systemName: imageVerticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
+                        .font(.title3).fontWeight(.semibold)
+                    Text("V-Align").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+        }
+    }
+
+    private func imageAlignmentIcon(for alignment: NSTextAlignment) -> String {
+        switch alignment {
+        case .center:  return "text.aligncenter"
+        case .right:   return "text.alignright"
+        default:       return "text.alignleft"
+        }
+    }
+
+    private func imageVerticalAlignmentIcon(for alignment: TextVerticalAlignment) -> String {
+        switch alignment {
+        case .top:    return "arrow.up.to.line"
+        case .middle: return "arrow.up.and.down"
+        case .bottom: return "arrow.down.to.line"
         }
     }
 
@@ -647,6 +733,13 @@ struct ImageFormEditorView: View {
 
     @ViewBuilder private var imageSelectImageSubtools: some View {
         HStack(alignment: .center, spacing: 8) {
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.imageBorderColor) },
+                set: { viewModel.imageBorderColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+
             Menu {
                 Button("None") { viewModel.imageBorderWidth = 0 }
                 Button("Thin (1pt)") { viewModel.imageBorderWidth = 1 }
@@ -662,14 +755,6 @@ struct ImageFormEditorView: View {
                 .foregroundStyle(Color.accentColor)
                 .padding(4)
                 .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
-            }
-            if viewModel.imageBorderWidth > 0 {
-                ColorPicker("", selection: Binding(
-                    get: { Color(viewModel.imageBorderColor) },
-                    set: { viewModel.imageBorderColor = UIColor($0) }
-                ))
-                .labelsHidden()
-                .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
             }
         }
     }
@@ -737,6 +822,8 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         view.textBoxFontSize = viewModel.textBoxFontSize
         view.textBoxIsBold = viewModel.textBoxIsBold
         view.textBoxTextColor = viewModel.textBoxTextColor
+        view.textBoxTextAlignment = viewModel.textBoxTextAlignment
+        view.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
         view.isShapeMode = viewModel.activeTool == .shape
         view.currentShapeKind = viewModel.activeShapeKind
         view.shapeStrokeColor = viewModel.shapeStrokeColor
@@ -959,6 +1046,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     var textBoxFontSize: CGFloat = 14
     var textBoxIsBold: Bool = false
     var textBoxTextColor: UIColor = .label
+    var textBoxTextAlignment: NSTextAlignment = .left
+    var textBoxVerticalAlignment: TextVerticalAlignment = .top
 
     /// When `true`, only Apple Pencil triggers drawing, shapes, and text boxes.
     /// The parent scroll view reverts to single-finger panning so the user
@@ -1558,7 +1647,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             backgroundColor: textBoxBackgroundColor,
             fontSize: textBoxFontSize,
             isBold: textBoxIsBold,
-            textColor: textBoxTextColor
+            textColor: textBoxTextColor,
+            textAlignment: textBoxTextAlignment,
+            verticalAlignment: textBoxVerticalAlignment
         )
         addTextBox(from: state, beginEditing: true)
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
@@ -1573,6 +1664,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setBackground(state.backgroundColor)
         box.setFontSize(state.fontSize, isBold: state.isBold)
         box.setTextColor(state.textColor)
+        box.setTextAlignment(state.textAlignment)
+        box.setVerticalAlignment(state.verticalAlignment)
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
@@ -1605,7 +1698,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             backgroundColor: box.currentBackgroundColor,
             fontSize: box.currentFontSize,
             isBold: box.currentIsBold,
-            textColor: box.currentTextColor
+            textColor: box.currentTextColor,
+            textAlignment: box.currentTextAlignment,
+            verticalAlignment: box.currentVerticalAlignment
         )
     }
 
@@ -1614,11 +1709,13 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         overlayView.endEditing(true)
     }
 
-    func applyTextStyle(fontSize: CGFloat, isBold: Bool, textColor: UIColor, backgroundColor: UIColor) {
+    func applyTextStyle(fontSize: CGFloat, isBold: Bool, textColor: UIColor, backgroundColor: UIColor, textAlignment: NSTextAlignment, verticalAlignment: TextVerticalAlignment) {
         guard let selectedTextBoxID,
               let box = textBoxViews[selectedTextBoxID] else { return }
         box.applyTextStyle(fontSize: fontSize, isBold: isBold, textColor: textColor)
         box.setBackground(backgroundColor)
+        box.setTextAlignment(textAlignment)
+        box.setVerticalAlignment(verticalAlignment)
     }
 
     // MARK: - Overlay Image Box Methods
@@ -1637,7 +1734,13 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             y: imgRect.midY - size.height / 2
         )
         let frame = CGRect(origin: origin, size: size)
-        let state = OverlayImageState(id: UUID(), frame: frame, imageData: data)
+        let state = OverlayImageState(
+            id: UUID(),
+            frame: frame,
+            imageData: data,
+            borderWidth: currentImageBorderWidth,
+            borderColor: currentImageBorderColor
+        )
         addImageBox(from: state)
         viewModel?.didMakeChange(.imageBox(add: state, remove: nil))
     }

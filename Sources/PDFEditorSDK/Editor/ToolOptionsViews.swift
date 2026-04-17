@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Draw Tool Options
 
@@ -14,7 +15,7 @@ struct DrawToolOptionsView: View {
     var body: some View {
         ToolOptionsContainer(title: "Draw Settings") {
             HStack {
-                Label("Color", systemImage: "paintbrush.tip")
+                Label("Color", systemImage: "paintbrush.pointed")
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
@@ -46,6 +47,8 @@ struct TextToolOptionsView: View {
     @Binding var backgroundColor: Color
     @Binding var fontSize: CGFloat
     @Binding var isBold: Bool
+    @Binding var textAlignment: NSTextAlignment
+    @Binding var verticalAlignment: TextVerticalAlignment
 
     var body: some View {
         ToolOptionsContainer(title: "Text Settings") {
@@ -92,6 +95,80 @@ struct TextToolOptionsView: View {
                     .fontWeight(.medium)
             }
             .toolOptionRow()
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Horizontal Alignment")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                HStack(spacing: 4) {
+                    ForEach([
+                        (NSTextAlignment.left,   "text.alignleft",   "Leading"),
+                        (.center,                "text.aligncenter", "Center"),
+                        (.right,                 "text.alignright",  "Trailing"),
+                    ] as [(NSTextAlignment, String, String)], id: \.2) { alignment, icon, label in
+                        Button {
+                            textAlignment = alignment
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: icon)
+                                    .font(.callout).fontWeight(.semibold)
+                                Text(label)
+                                    .font(.caption2).fontWeight(.medium)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(
+                                textAlignment == alignment
+                                    ? Color.accentColor
+                                    : Color.secondary.opacity(0.15),
+                                in: .rect(cornerRadius: 8)
+                            )
+                            .foregroundStyle(textAlignment == alignment ? Color.white : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .toolOptionRow()
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Vertical Alignment")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                HStack(spacing: 4) {
+                    ForEach([
+                        (TextVerticalAlignment.top,    "arrow.up.to.line",     "Top"),
+                        (.middle,                      "arrow.up.and.down",    "Middle"),
+                        (.bottom,                      "arrow.down.to.line",   "Bottom"),
+                    ] as [(TextVerticalAlignment, String, String)], id: \.2) { alignment, icon, label in
+                        Button {
+                            verticalAlignment = alignment
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: icon)
+                                    .font(.callout).fontWeight(.semibold)
+                                Text(label)
+                                    .font(.caption2).fontWeight(.medium)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(
+                                verticalAlignment == alignment
+                                    ? Color.accentColor
+                                    : Color.secondary.opacity(0.15),
+                                in: .rect(cornerRadius: 8)
+                            )
+                            .foregroundStyle(verticalAlignment == alignment ? Color.white : Color.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .toolOptionRow()
         }
     }
 }
@@ -122,7 +199,7 @@ struct ShapeToolOptionsView: View {
             Divider()
 
             HStack {
-                Label("Stroke Color", systemImage: "paintbrush.tip")
+                Label("Stroke Color", systemImage: "paintbrush.pointed")
                     .font(.caption)
                     .fontWeight(.medium)
                 Spacer()
@@ -140,6 +217,40 @@ struct ShapeToolOptionsView: View {
                 SegmentedOptionRow(
                     options: [(1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")],
                     selected: $lineWidth
+                )
+            }
+            .toolOptionRow()
+        }
+    }
+}
+
+// MARK: - Image Border Defaults (toolbar long-press popover)
+
+struct ImageBorderToolOptionsView: View {
+    @Binding var borderWidth: CGFloat
+    @Binding var borderColor: Color
+
+    var body: some View {
+        ToolOptionsContainer(title: "Image Border") {
+            HStack {
+                Label("Border Color", systemImage: "paintbrush.pointed")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+                ColorPicker("", selection: $borderColor)
+                    .labelsHidden()
+            }
+            .toolOptionRow()
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Default width")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                SegmentedOptionRow(
+                    options: [(0.0, "None"), (1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")],
+                    selected: $borderWidth
                 )
             }
             .toolOptionRow()

@@ -30,6 +30,10 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     var currentIsBold: Bool {
         textView.font?.fontDescriptor.symbolicTraits.contains(.traitBold) ?? false
     }
+    var currentTextAlignment: NSTextAlignment { textView.textAlignment }
+    private var _verticalAlignment: TextVerticalAlignment = .top
+    var currentVerticalAlignment: TextVerticalAlignment { _verticalAlignment }
+    private let overflowIndicator = UIImageView()
     var onSelect: ((UUID) -> Void)?
     /// Called when the embedded `UITextView` gains or loses first responder (keyboard show/hide).
     var onTextEditingFocusChange: (() -> Void)?
@@ -110,13 +114,24 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         addGestureRecognizer(pinch)
         pinchGesture = pinch
 
+        let overflowSymbolConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            .applying(UIImage.SymbolConfiguration(paletteColors: [.systemBackground, .systemOrange]))
+        overflowIndicator.image = UIImage(systemName: "exclamationmark.circle.fill",
+                                          withConfiguration: overflowSymbolConfig)
+        overflowIndicator.contentMode = .scaleAspectFit
+        overflowIndicator.isHidden = true
+        overflowIndicator.layer.zPosition = 3
+        overflowIndicator.isUserInteractionEnabled = false
+        addSubview(overflowIndicator)
+
         isSelected = true
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
         textView.frame = bounds.inset(by: padding)
-        
+        updateVerticalInset()
+
         let handleSize: CGFloat = 16
         moveHandle.frame = CGRect(x: -6, y: -6, width: handleSize, height: handleSize)
         moveIcon.frame = moveHandle.bounds.insetBy(dx: 2, dy: 2)
@@ -127,10 +142,19 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
             height: handleSize
         )
         resizeIcon.frame = resizeHandle.bounds.insetBy(dx: 2, dy: 2)
+
+        let indicatorSize: CGFloat = 18
+        overflowIndicator.frame = CGRect(
+            x: (bounds.width - indicatorSize) / 2,
+            y: bounds.height - indicatorSize * 0.55,
+            width: indicatorSize,
+            height: indicatorSize
+        )
     }
     
     func setText(_ text: String) {
         textView.text = text
+        updateVerticalInset()
     }
     
     func setBackground(_ color: UIColor) {
@@ -139,10 +163,49 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     
     func setFontSize(_ size: CGFloat, isBold: Bool = false) {
         textView.font = isBold ? UIFont.boldSystemFont(ofSize: size) : UIFont.systemFont(ofSize: size)
+        updateVerticalInset()
     }
     
     func setTextColor(_ color: UIColor) {
         textView.textColor = color
+    }
+
+    func setTextAlignment(_ alignment: NSTextAlignment) {
+        textView.textAlignment = alignment
+    }
+
+    func setVerticalAlignment(_ alignment: TextVerticalAlignment) {
+        _verticalAlignment = alignment
+        updateVerticalInset()
+    }
+
+    /// Adjusts `textContainerInset.top` so the text content sits at the
+    /// correct vertical position within the text view frame.
+    private func updateVerticalInset() {
+        guard textView.frame.height > 0 else { return }
+        let fitting = textView.sizeThatFits(CGSize(width: textView.frame.width, height: .greatestFiniteMagnitude))
+        let contentHeight = fitting.height
+        let available = textView.frame.height
+        var topOffset: CGFloat = 0
+        switch _verticalAlignment {
+        case .top:
+            topOffset = 0
+        case .middle:
+            topOffset = max(0, (available - contentHeight) / 2)
+        case .bottom:
+            topOffset = max(0, available - contentHeight)
+        }
+        textView.textContainerInset = UIEdgeInsets(top: topOffset, left: 0, bottom: 0, right: 0)
+        updateOverflowIndicator()
+    }
+
+    private func updateOverflowIndicator() {
+        guard textView.frame.width > 0, textView.frame.height > 0 else { return }
+        let fitting = textView.sizeThatFits(
+            CGSize(width: textView.frame.width, height: .greatestFiniteMagnitude)
+        )
+        let isOverflowing = fitting.height > textView.frame.height + 1
+        overflowIndicator.isHidden = !isOverflowing
     }
 
     var isTextInputFirstResponder: Bool { textView.isFirstResponder }
@@ -302,8 +365,13 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         }
         textView.typingAttributes[.font] = font
         textView.typingAttributes[.foregroundColor] = textColor
+        updateVerticalInset()
     }
-    
+
+    func textViewDidChange(_ textView: UITextView) {
+        updateVerticalInset()
+    }
+
     func textViewDidBeginEditing(_ textView: UITextView) {
         isSelected = true
         onSelect?(id)

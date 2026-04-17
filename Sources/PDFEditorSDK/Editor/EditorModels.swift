@@ -41,6 +41,12 @@ enum OverlayShapeKind: String, Codable {
     case triangle
 }
 
+enum TextVerticalAlignment: String, Codable {
+    case top
+    case middle
+    case bottom
+}
+
 enum SelectedOverlayKind {
     case textBox, image, shape
 }
@@ -53,6 +59,8 @@ struct OverlayTextBoxState: Identifiable {
     var fontSize: CGFloat
     var isBold: Bool
     var textColor: UIColor
+    var textAlignment: NSTextAlignment = .left
+    var verticalAlignment: TextVerticalAlignment = .top
 }
 
 struct OverlayImageState: Identifiable {
@@ -100,6 +108,8 @@ struct OverlayTextBoxMeta: Codable {
     var fontSize: CGFloat?
     var isBold: Bool?
     var textColor: RGBAColor?
+    var textAlignment: Int?          // NSTextAlignment.rawValue; nil = legacy (defaults to .left)
+    var verticalAlignment: String?   // TextVerticalAlignment.rawValue; nil = legacy (defaults to .top)
 }
 
 struct OverlayImageMeta: Codable {

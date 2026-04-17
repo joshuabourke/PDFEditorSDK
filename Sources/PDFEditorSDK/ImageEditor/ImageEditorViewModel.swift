@@ -38,6 +38,12 @@ class ImageEditorViewModel {
     var textBoxTextColor: UIColor {
         didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); preferences.save()}
     }
+    var textBoxTextAlignment: NSTextAlignment {
+        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; preferences.save()}
+    }
+    var textBoxVerticalAlignment: TextVerticalAlignment {
+        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
+    }
     var activeShapeKind: OverlayShapeKind {
         didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
     }
@@ -107,7 +113,9 @@ class ImageEditorViewModel {
         self.textBoxIsBold = prefs.textBoxIsBold
         self.textBoxTextColor = prefs.textBoxTextColor.uiColor
         self.textBoxFontSize = prefs.textBoxFontSize
-        
+        self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
+        self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
+
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeLineWidth = prefs.shapeLineWidth
         self.shapeStrokeColor = prefs.shapeStrokeColor.uiColor
@@ -175,7 +183,9 @@ class ImageEditorViewModel {
             fontSize: textBoxFontSize,
             isBold: textBoxIsBold,
             textColor: textBoxTextColor,
-            backgroundColor: textBoxBackgroundColor
+            backgroundColor: textBoxBackgroundColor,
+            textAlignment: textBoxTextAlignment,
+            verticalAlignment: textBoxVerticalAlignment
         )
     }
 

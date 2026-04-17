@@ -78,13 +78,15 @@ struct PDFFormEditorView: View {
     @State private var showTextOptions = false
     @State private var showShapeOptions = false
     @State private var showEraserOptions = false
+    @State private var showAddImageSourceDialog = false
+    @State private var showImageBorderOptions = false
 
     ///This is tracking to see if the user has made changes to a document, this is used to display an alert if they attempt to exit without saving.
     @State private var changesNotSaved: Bool = false
     
     var body: some View {
         coreEditorView
-            .sheet(isPresented: $isShowingImagePicker) {
+            .fullScreenCover(isPresented: $isShowingImagePicker) {
                 ImagePicker(sourceType: imagePickerSource.uiSourceType, allowsEditing: true) { image in
                     viewModel.handleImagePickedFromSheet(image)
                 }
@@ -125,6 +127,8 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.textBoxIsBold) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxTextColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.textBoxTextAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.textBoxVerticalAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.imageBorderWidth) { _, _ in viewModel.applyImageBorderToSelected() }
@@ -469,7 +473,9 @@ struct PDFFormEditorView: View {
                                     set: { viewModel.textBoxBackgroundColor = UIColor($0) }
                                 ),
                                 fontSize: $viewModel.textBoxFontSize,
-                                isBold: $viewModel.textBoxIsBold
+                                isBold: $viewModel.textBoxIsBold,
+                                textAlignment: $viewModel.textBoxTextAlignment,
+                                verticalAlignment: $viewModel.textBoxVerticalAlignment
                             )
                         }
                     }
@@ -486,35 +492,59 @@ struct PDFFormEditorView: View {
                         .frame(width: 1, height: 36)
                         .padding(.top, 14)
 
-                    VStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Image")
                             .font(.caption2)
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        HStack {
-                            Menu {
-                                Button("Camera") {
-                                    viewModel.imagePickIsForFormWidget = false
-                                    imagePickerSource = .camera
-                                    isShowingImagePicker = true
+                        VStack(spacing: 4) {
+                            Image(systemName: "photo.on.rectangle")
+                                .fontWeight(.semibold)
+                            Text("Image")
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                        .padding(6)
+                        .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                        .contentShape(Rectangle())
+                        .gesture(
+                            ExclusiveGesture(
+                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                    showImageBorderOptions = true
+                                },
+                                TapGesture().onEnded {
+                                    showAddImageSourceDialog = true
                                 }
-                                Button("Photo Library") {
-                                    viewModel.imagePickIsForFormWidget = false
-                                    imagePickerSource = .photoLibrary
-                                    isShowingImagePicker = true
-                                }
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "photo.on.rectangle")
-                                        .fontWeight(.semibold)
-                                    Text("Image")
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                            )
+                        )
+                        .popover(isPresented: $showImageBorderOptions, arrowEdge: .top) {
+                            ImageBorderToolOptionsView(
+                                borderWidth: $viewModel.imageBorderWidth,
+                                borderColor: Binding(
+                                    get: { Color(viewModel.imageBorderColor) },
+                                    set: { viewModel.imageBorderColor = UIColor($0) }
+                                )
+                            )
+                        }
+                        .confirmationDialog(
+                            "Add Image",
+                            isPresented: $showAddImageSourceDialog,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Camera") {
+                                viewModel.imagePickIsForFormWidget = false
+                                imagePickerSource = .camera
+                                isShowingImagePicker = true
                             }
+                            Button("Photo Library") {
+                                viewModel.imagePickIsForFormWidget = false
+                                imagePickerSource = .photoLibrary
+                                isShowingImagePicker = true
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Choose a source for the image.")
                         }
                     }
 
@@ -749,7 +779,13 @@ struct PDFFormEditorView: View {
     @ViewBuilder
     private var selectImageSubtools: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Border thickness
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.imageBorderColor) },
+                set: { viewModel.imageBorderColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+
             Menu {
                 Button("None") { viewModel.imageBorderWidth = 0 }
                 Button("Thin (1pt)") { viewModel.imageBorderWidth = 1 }
@@ -765,16 +801,6 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor)
                 .padding(4)
                 .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
-            }
-
-            // Border colour — only show when a border is active
-            if viewModel.imageBorderWidth > 0 {
-                ColorPicker("", selection: Binding(
-                    get: { Color(viewModel.imageBorderColor) },
-                    set: { viewModel.imageBorderColor = UIColor($0) }
-                ))
-                .labelsHidden()
-                .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
             }
         }
     }
@@ -833,6 +859,70 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
             }
             .buttonStyle(.plain)
+            Menu {
+                Button {
+                    viewModel.textBoxTextAlignment = .left
+                } label: {
+                    Label("Leading", systemImage: "text.alignleft")
+                }
+                Button {
+                    viewModel.textBoxTextAlignment = .center
+                } label: {
+                    Label("Center", systemImage: "text.aligncenter")
+                }
+                Button {
+                    viewModel.textBoxTextAlignment = .right
+                } label: {
+                    Label("Trailing", systemImage: "text.alignright")
+                }
+            } label: {
+                toolbarChip {
+                    Image(systemName: alignmentIcon(for: viewModel.textBoxTextAlignment))
+                        .font(.title3).fontWeight(.semibold)
+                    Text("Align").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+            Menu {
+                Button {
+                    viewModel.textBoxVerticalAlignment = .top
+                } label: {
+                    Label("Top", systemImage: "arrow.up.to.line")
+                }
+                Button {
+                    viewModel.textBoxVerticalAlignment = .middle
+                } label: {
+                    Label("Middle", systemImage: "arrow.up.and.down")
+                }
+                Button {
+                    viewModel.textBoxVerticalAlignment = .bottom
+                } label: {
+                    Label("Bottom", systemImage: "arrow.down.to.line")
+                }
+            } label: {
+                toolbarChip {
+                    Image(systemName: verticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
+                        .font(.title3).fontWeight(.semibold)
+                    Text("V-Align").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            }
+        }
+    }
+
+    private func alignmentIcon(for alignment: NSTextAlignment) -> String {
+        switch alignment {
+        case .center:  return "text.aligncenter"
+        case .right:   return "text.alignright"
+        default:       return "text.alignleft"
+        }
+    }
+
+    private func verticalAlignmentIcon(for alignment: TextVerticalAlignment) -> String {
+        switch alignment {
+        case .top:    return "arrow.up.to.line"
+        case .middle: return "arrow.up.and.down"
+        case .bottom: return "arrow.down.to.line"
         }
     }
 
@@ -1036,6 +1126,8 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.textBoxFontSize = viewModel.textBoxFontSize
         pdfView.textBoxIsBold = viewModel.textBoxIsBold
         pdfView.textBoxTextColor = viewModel.textBoxTextColor
+        pdfView.textBoxTextAlignment = viewModel.textBoxTextAlignment
+        pdfView.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
         pdfView.isShapeMode = viewModel.activeTool == .shape
         pdfView.currentShapeKind = viewModel.activeShapeKind
         pdfView.shapeStrokeColor = viewModel.shapeStrokeColor
