@@ -61,6 +61,7 @@ struct OverlayTextBoxState: Identifiable {
     var textColor: UIColor
     var textAlignment: NSTextAlignment = .left
     var verticalAlignment: TextVerticalAlignment = .top
+    var autoResizeEnabled: Bool = false
 }
 
 struct OverlayImageState: Identifiable {
@@ -110,6 +111,7 @@ struct OverlayTextBoxMeta: Codable {
     var textColor: RGBAColor?
     var textAlignment: Int?          // NSTextAlignment.rawValue; nil = legacy (defaults to .left)
     var verticalAlignment: String?   // TextVerticalAlignment.rawValue; nil = legacy (defaults to .top)
+    var autoResize: Bool?            // nil = legacy (defaults to false)
 }
 
 struct OverlayImageMeta: Codable {

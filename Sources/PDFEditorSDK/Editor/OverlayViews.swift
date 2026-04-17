@@ -33,6 +33,8 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     var currentTextAlignment: NSTextAlignment { textView.textAlignment }
     private var _verticalAlignment: TextVerticalAlignment = .top
     var currentVerticalAlignment: TextVerticalAlignment { _verticalAlignment }
+    private var _autoResizeEnabled: Bool = false
+    var currentAutoResize: Bool { _autoResizeEnabled }
     private let overflowIndicator = UIImageView()
     var onSelect: ((UUID) -> Void)?
     /// Called when the embedded `UITextView` gains or loses first responder (keyboard show/hide).
@@ -154,16 +156,37 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     
     func setText(_ text: String) {
         textView.text = text
+        if _autoResizeEnabled { autoExpandIfNeeded() }
         updateVerticalInset()
     }
-    
+
     func setBackground(_ color: UIColor) {
         backgroundColor = color
     }
-    
+
     func setFontSize(_ size: CGFloat, isBold: Bool = false) {
         textView.font = isBold ? UIFont.boldSystemFont(ofSize: size) : UIFont.systemFont(ofSize: size)
+        if _autoResizeEnabled { autoExpandIfNeeded() }
         updateVerticalInset()
+    }
+
+    func setAutoResize(_ enabled: Bool) {
+        _autoResizeEnabled = enabled
+        if enabled { autoExpandIfNeeded() }
+        updateOverflowIndicator()
+    }
+
+    /// Grows the text box height vertically to fit the current text content.
+    /// Only modifies height; the user retains full control of width and position.
+    private func autoExpandIfNeeded() {
+        guard _autoResizeEnabled, let container = superview else { return }
+        let textWidth = max(1, bounds.width - padding.left - padding.right)
+        let fitting = textView.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude))
+        let required = max(minSize.height, ceil(fitting.height) + padding.top + padding.bottom)
+        let maxAllowed = container.bounds.height - frame.origin.y
+        let newHeight = min(required, maxAllowed)
+        guard abs(newHeight - frame.height) > 0.5 else { return }
+        frame = CGRect(origin: frame.origin, size: CGSize(width: frame.width, height: newHeight))
     }
     
     func setTextColor(_ color: UIColor) {
@@ -365,10 +388,12 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         }
         textView.typingAttributes[.font] = font
         textView.typingAttributes[.foregroundColor] = textColor
+        if _autoResizeEnabled { autoExpandIfNeeded() }
         updateVerticalInset()
     }
 
     func textViewDidChange(_ textView: UITextView) {
+        if _autoResizeEnabled { autoExpandIfNeeded() }
         updateVerticalInset()
     }
 

@@ -128,6 +128,7 @@ class PDFFormViewModel {
         self.textBoxTextColor = prefs.textBoxTextColor.uiColor
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
+        self.textBoxAutoResize = prefs.textBoxAutoResize
 
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeStrokeColor = prefs.shapeStrokeColor.uiColor
@@ -147,6 +148,12 @@ class PDFFormViewModel {
     }
     
     var selectedOverlayKind: SelectedOverlayKind?
+    /// Persisted default applied to every newly drawn text box.
+    var textBoxAutoResize: Bool {
+        didSet { preferences.textBoxAutoResize = textBoxAutoResize; preferences.save() }
+    }
+    /// Reflects the auto-resize state of the currently selected text box (not persisted).
+    var selectedTextBoxAutoResize: Bool = false
 
     var isDrawingMode: Bool { activeTool == .draw }
     var isEraserMode: Bool { activeTool == .erase }
@@ -286,6 +293,10 @@ class PDFFormViewModel {
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment
         )
+    }
+
+    func applyAutoResizeToSelectedTextBox() {
+        pdfView?.setSelectedTextBoxAutoResize(selectedTextBoxAutoResize)
     }
     
     func updatePageMetrics() {

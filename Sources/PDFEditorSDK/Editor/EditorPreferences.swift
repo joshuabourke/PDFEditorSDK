@@ -32,6 +32,7 @@ struct EditorPreferences: Codable {
     var textBoxBackgroundColor: RGBAColor = RGBAColor(r: 1, g: 0.91, b: 0.25, a: 1)// System Yellow
     var textBoxTextAlignment: Int = 0              // NSTextAlignment.left.rawValue
     var textBoxVerticalAlignment: String = "top"   // TextVerticalAlignment.rawValue
+    var textBoxAutoResize: Bool = false
     
     //Shape
     var activeShapeKind: OverlayShapeKind = .rectangle

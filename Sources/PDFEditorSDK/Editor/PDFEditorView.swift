@@ -129,6 +129,7 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxTextAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxVerticalAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.selectedTextBoxAutoResize) { _, _ in viewModel.applyAutoResizeToSelectedTextBox() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.imageBorderWidth) { _, _ in viewModel.applyImageBorderToSelected() }
@@ -475,7 +476,8 @@ struct PDFFormEditorView: View {
                                 fontSize: $viewModel.textBoxFontSize,
                                 isBold: $viewModel.textBoxIsBold,
                                 textAlignment: $viewModel.textBoxTextAlignment,
-                                verticalAlignment: $viewModel.textBoxVerticalAlignment
+                                verticalAlignment: $viewModel.textBoxVerticalAlignment,
+                                autoResize: $viewModel.textBoxAutoResize
                             )
                         }
                     }
@@ -907,6 +909,16 @@ struct PDFFormEditorView: View {
                 }
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
+
+            Button { viewModel.selectedTextBoxAutoResize.toggle() } label: {
+                toolbarChip {
+                    Image(systemName: "arrow.up.and.down")
+                        .font(.title3).fontWeight(.semibold)
+                    Text("Auto Size").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.selectedTextBoxAutoResize))
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -1128,6 +1140,7 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.textBoxTextColor = viewModel.textBoxTextColor
         pdfView.textBoxTextAlignment = viewModel.textBoxTextAlignment
         pdfView.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
+        pdfView.textBoxAutoResize = viewModel.textBoxAutoResize
         pdfView.isShapeMode = viewModel.activeTool == .shape
         pdfView.currentShapeKind = viewModel.activeShapeKind
         pdfView.shapeStrokeColor = viewModel.shapeStrokeColor

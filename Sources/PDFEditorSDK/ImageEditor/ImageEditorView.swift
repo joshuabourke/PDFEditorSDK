@@ -311,7 +311,8 @@ struct ImageFormEditorView: View {
                                 fontSize: $viewModel.textBoxFontSize,
                                 isBold: $viewModel.textBoxIsBold,
                                 textAlignment: $viewModel.textBoxTextAlignment,
-                                verticalAlignment: $viewModel.textBoxVerticalAlignment
+                                verticalAlignment: $viewModel.textBoxVerticalAlignment,
+                                autoResize: $viewModel.textBoxAutoResize
                             )
                         }
                     }

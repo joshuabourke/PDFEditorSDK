@@ -49,6 +49,7 @@ struct TextToolOptionsView: View {
     @Binding var isBold: Bool
     @Binding var textAlignment: NSTextAlignment
     @Binding var verticalAlignment: TextVerticalAlignment
+    @Binding var autoResize: Bool
 
     var body: some View {
         ToolOptionsContainer(title: "Text Settings") {
@@ -167,6 +168,15 @@ struct TextToolOptionsView: View {
                         .buttonStyle(.plain)
                     }
                 }
+            }
+            .toolOptionRow()
+
+            Divider()
+
+            Toggle(isOn: $autoResize) {
+                Label("Auto Size to Text", systemImage: "arrow.up.and.down")
+                    .font(.caption)
+                    .fontWeight(.medium)
             }
             .toolOptionRow()
         }

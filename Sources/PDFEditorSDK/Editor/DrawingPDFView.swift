@@ -313,6 +313,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     var textBoxTextColor: UIColor = .label
     var textBoxTextAlignment: NSTextAlignment = .left
     var textBoxVerticalAlignment: TextVerticalAlignment = .top
+    var textBoxAutoResize: Bool = false
 
     /// When `true`, only Apple Pencil triggers annotations. Finger touches are
     /// passed through to PDFKit so the user can pan and zoom normally with one finger.
@@ -1577,7 +1578,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             isBold: textBoxIsBold,
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
-            verticalAlignment: textBoxVerticalAlignment
+            verticalAlignment: textBoxVerticalAlignment,
+            autoResizeEnabled: textBoxAutoResize
         )
         addOverlayTextBox(from: state, beginEditing: true)
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
@@ -1592,6 +1594,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.setTextColor(state.textColor)
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
+        box.setAutoResize(state.autoResizeEnabled)
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
@@ -1630,8 +1633,14 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             isBold: box.currentIsBold,
             textColor: box.currentTextColor,
             textAlignment: box.currentTextAlignment,
-            verticalAlignment: box.currentVerticalAlignment
+            verticalAlignment: box.currentVerticalAlignment,
+            autoResizeEnabled: box.currentAutoResize
         )
+    }
+
+    func setSelectedTextBoxAutoResize(_ enabled: Bool) {
+        guard let id = selectedTextBoxID, let box = textBoxViews[id] else { return }
+        box.setAutoResize(enabled)
     }
     
     func applyTextStyleToSelectedTextBox(fontSize: CGFloat, isBold: Bool, textColor: UIColor, backgroundColor: UIColor, textAlignment: NSTextAlignment, verticalAlignment: TextVerticalAlignment) {
@@ -1755,10 +1764,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         selectedShapeID = nil
         deselectInkAnnotation()
         formViewModel?.selectedOverlayKind = .textBox
-        updateOverlaySelectionUI()
         if let box = textBoxViews[id] {
+            formViewModel?.selectedTextBoxAutoResize = box.currentAutoResize
             textBoxOverlayView.bringSubviewToFront(box)
         }
+        updateOverlaySelectionUI()
     }
 
     private func selectImageBox(id: UUID) {
@@ -1910,7 +1920,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 isBold: box.currentIsBold,
                 textColor: RGBAColor(box.currentTextColor),
                 textAlignment: box.currentTextAlignment.rawValue,
-                verticalAlignment: box.currentVerticalAlignment.rawValue
+                verticalAlignment: box.currentVerticalAlignment.rawValue,
+                autoResize: box.currentAutoResize ? true : nil
             )
             textMetas.append(meta)
         }
@@ -1957,7 +1968,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 isBold: text.isBold ?? false,
                 textColor: (text.textColor?.uiColor) ?? .label,
                 textAlignment: NSTextAlignment(rawValue: text.textAlignment ?? 0) ?? .left,
-                verticalAlignment: TextVerticalAlignment(rawValue: text.verticalAlignment ?? "") ?? .top
+                verticalAlignment: TextVerticalAlignment(rawValue: text.verticalAlignment ?? "") ?? .top,
+                autoResizeEnabled: text.autoResize ?? false
             )
             addOverlayTextBox(from: state, beginEditing: false)
         }

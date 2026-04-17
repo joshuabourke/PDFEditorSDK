@@ -44,6 +44,9 @@ class ImageEditorViewModel {
     var textBoxVerticalAlignment: TextVerticalAlignment {
         didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
     }
+    var textBoxAutoResize: Bool {
+        didSet { preferences.textBoxAutoResize = textBoxAutoResize; preferences.save() }
+    }
     var activeShapeKind: OverlayShapeKind {
         didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
     }
@@ -115,6 +118,7 @@ class ImageEditorViewModel {
         self.textBoxFontSize = prefs.textBoxFontSize
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
+        self.textBoxAutoResize = prefs.textBoxAutoResize
 
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeLineWidth = prefs.shapeLineWidth
