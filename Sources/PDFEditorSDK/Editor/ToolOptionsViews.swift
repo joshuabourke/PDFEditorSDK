@@ -6,11 +6,50 @@
 import SwiftUI
 import UIKit
 
+// MARK: - Scrollable toolbar / menu helpers
+
+/// Vertical scroll for `Menu` content when the action list is taller than available space (e.g. iPad landscape).
+struct MenuScrollableActions<Content: View>: View {
+    var maxHeight: CGFloat = 340
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+        }
+        .frame(maxHeight: maxHeight)
+    }
+}
+
+/// Many toolbar chips in one row: caps width so the strip scrolls horizontally instead of clipping.
+struct ToolbarSubtoolsScrollRow<Content: View>: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @ViewBuilder var content: () -> Content
+
+    private var maxStripWidth: CGFloat {
+        horizontalSizeClass == .compact ? 300 : 540
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            HStack(alignment: .center, spacing: 8) {
+                content()
+            }
+        }
+        .frame(maxWidth: maxStripWidth)
+    }
+}
+
 // MARK: - Draw Tool Options
 
 struct DrawToolOptionsView: View {
     @Binding var inkColor: Color
     @Binding var inkLineWidth: CGFloat
+    var lineWidthInputStyle: LineWidthInputStyle
+    var lineWidthStep: CGFloat
+    var lineWidthMax: CGFloat
 
     var body: some View {
         ToolOptionsContainer(title: "Draw Settings") {
@@ -26,15 +65,15 @@ struct DrawToolOptionsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Line Width")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                SegmentedOptionRow(
-                    options: [(1.0, "1pt"), (3.0, "3pt"), (6.0, "6pt")],
-                    selected: $inkLineWidth
-                )
-            }
+            LineWidthInputRow(
+                title: "Line Width",
+                value: $inkLineWidth,
+                style: lineWidthInputStyle,
+                step: lineWidthStep,
+                max: lineWidthMax,
+                allowsZero: false,
+                presetOptions: [(1.0, "1pt"), (3.0, "3pt"), (6.0, "6pt")]
+            )
             .toolOptionRow()
         }
     }
@@ -50,9 +89,23 @@ struct TextToolOptionsView: View {
     @Binding var textAlignment: NSTextAlignment
     @Binding var verticalAlignment: TextVerticalAlignment
     @Binding var autoResize: Bool
+    @Binding var borderWidth: CGFloat
+    @Binding var borderColor: Color
+    var lineWidthInputStyle: LineWidthInputStyle
+    var lineWidthStep: CGFloat
+    var lineWidthMax: CGFloat
+
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+
+    /// Long-press Text tool popover: cap scroll area so the sheet fits in compact vertical space (e.g. iPhone / iPad landscape).
+    private var textOptionsScrollMaxHeight: CGFloat {
+        verticalSizeClass == .compact ? 280 : 420
+    }
 
     var body: some View {
         ToolOptionsContainer(title: "Text Settings") {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Label("Text Color", systemImage: "character")
                     .font(.caption)
@@ -179,6 +232,34 @@ struct TextToolOptionsView: View {
                     .fontWeight(.medium)
             }
             .toolOptionRow()
+
+            Divider()
+
+            HStack {
+                Label("Border Color", systemImage: "square.dashed")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+                ColorPicker("", selection: $borderColor)
+                    .labelsHidden()
+            }
+            .toolOptionRow()
+
+            Divider()
+
+            LineWidthInputRow(
+                title: "Border Width",
+                value: $borderWidth,
+                style: lineWidthInputStyle,
+                step: lineWidthStep,
+                max: lineWidthMax,
+                allowsZero: true,
+                presetOptions: [(0.0, "None"), (1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")]
+            )
+            .toolOptionRow()
+                }
+            }
+            .frame(maxHeight: textOptionsScrollMaxHeight)
         }
     }
 }
@@ -189,6 +270,9 @@ struct ShapeToolOptionsView: View {
     @Binding var shapeKind: OverlayShapeKind
     @Binding var strokeColor: Color
     @Binding var lineWidth: CGFloat
+    var lineWidthInputStyle: LineWidthInputStyle
+    var lineWidthStep: CGFloat
+    var lineWidthMax: CGFloat
 
     var body: some View {
         ToolOptionsContainer(title: "Shape Settings") {
@@ -220,15 +304,15 @@ struct ShapeToolOptionsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Line Width")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                SegmentedOptionRow(
-                    options: [(1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")],
-                    selected: $lineWidth
-                )
-            }
+            LineWidthInputRow(
+                title: "Line Width",
+                value: $lineWidth,
+                style: lineWidthInputStyle,
+                step: lineWidthStep,
+                max: lineWidthMax,
+                allowsZero: false,
+                presetOptions: [(1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")]
+            )
             .toolOptionRow()
         }
     }
@@ -239,6 +323,9 @@ struct ShapeToolOptionsView: View {
 struct ImageBorderToolOptionsView: View {
     @Binding var borderWidth: CGFloat
     @Binding var borderColor: Color
+    var lineWidthInputStyle: LineWidthInputStyle
+    var lineWidthStep: CGFloat
+    var lineWidthMax: CGFloat
 
     var body: some View {
         ToolOptionsContainer(title: "Image Border") {
@@ -254,15 +341,15 @@ struct ImageBorderToolOptionsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Default width")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                SegmentedOptionRow(
-                    options: [(0.0, "None"), (1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")],
-                    selected: $borderWidth
-                )
-            }
+            LineWidthInputRow(
+                title: "Default width",
+                value: $borderWidth,
+                style: lineWidthInputStyle,
+                step: lineWidthStep,
+                max: lineWidthMax,
+                allowsZero: true,
+                presetOptions: [(0.0, "None"), (1.0, "1pt"), (2.0, "2pt"), (4.0, "4pt"), (6.0, "6pt")]
+            )
             .toolOptionRow()
         }
     }
@@ -346,6 +433,179 @@ struct SegmentedOptionRow<T: Equatable>: View {
                 .foregroundStyle(selected == pair.0 ? Color.white : Color.primary)
             }
         }
+    }
+}
+
+// MARK: - Line width (preset vs stepper)
+
+private struct LineWidthStepperControl: View {
+    @Binding var value: CGFloat
+    let step: CGFloat
+    let max: CGFloat
+    let allowsZero: Bool
+
+    @State private var editingText = ""
+    @FocusState private var isFieldFocused: Bool
+
+    private var minWidth: CGFloat { allowsZero ? 0 : 0.25 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if allowsZero || isFieldFocused {
+                HStack(spacing: 8) {
+                    if allowsZero {
+                        Button("None") {
+                            value = 0
+                            editingText = "0"
+                            isFieldFocused = false
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.caption)
+                        .controlSize(.small)
+                    }
+                    Spacer(minLength: 0)
+                    if isFieldFocused {
+                        Button("Done") {
+                            commitEditing()
+                            isFieldFocused = false
+                        }
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    }
+                }
+            }
+
+            Stepper(
+                value: Binding(
+                    get: { Double(value) },
+                    set: { newVal in
+                        value = LineWidthFormatting.snap(CGFloat(newVal), step: step, min: minWidth, max: max)
+                        syncTextFromValue()
+                    }
+                ),
+                in: Double(minWidth)...Double(max),
+                step: Double(step)
+            ) {
+                HStack(spacing: 8) {
+                    TextField("Width", text: $editingText)
+                        .keyboardType(.decimalPad)
+                        .focused($isFieldFocused)
+                        .multilineTextAlignment(.trailing)
+                        .font(.body.monospacedDigit())
+                        .frame(minWidth: 48, maxWidth: 88)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityLabel("Width in points")
+                    Text("pt")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear {
+            syncTextFromValue()
+        }
+        .onChange(of: value) { _, _ in
+            if !isFieldFocused {
+                syncTextFromValue()
+            }
+        }
+        .onChange(of: isFieldFocused) { _, focused in
+            if !focused {
+                commitEditing()
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Done") {
+                        commitEditing()
+                        isFieldFocused = false
+                    }
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+    }
+
+    private func syncTextFromValue() {
+        editingText = formattedNumber(for: value)
+    }
+
+    /// Numeric string for the text field (no "pt" suffix).
+    private func formattedNumber(for v: CGFloat) -> String {
+        if allowsZero && v <= 0 { return "0" }
+        if step < 1 {
+            return String(format: "%.1f", Double(v))
+        }
+        return "\(Int(v.rounded()))"
+    }
+
+    private func commitEditing() {
+        let trimmed = editingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            syncTextFromValue()
+            return
+        }
+        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+        guard let parsed = Double(normalized) else {
+            syncTextFromValue()
+            return
+        }
+        if allowsZero && parsed <= 0 {
+            value = 0
+            editingText = "0"
+            return
+        }
+        let snapped = LineWidthFormatting.snap(CGFloat(parsed), step: step, min: minWidth, max: max)
+        value = snapped
+        syncTextFromValue()
+    }
+}
+
+struct LineWidthInputRow: View {
+    var title: String?
+    @Binding var value: CGFloat
+    let style: LineWidthInputStyle
+    let step: CGFloat
+    let max: CGFloat
+    let allowsZero: Bool
+    let presetOptions: [(CGFloat, String)]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+            }
+            if style == .presetButtons {
+                SegmentedOptionRow(options: presetOptions, selected: $value)
+            } else {
+                LineWidthStepperControl(value: $value, step: step, max: max, allowsZero: allowsZero)
+            }
+        }
+    }
+}
+
+/// Stepper-only panel for compact toolbar popovers when line width style is stepper.
+struct ToolbarLineWidthStepperPanel: View {
+    @Binding var width: CGFloat
+    let step: CGFloat
+    let max: CGFloat
+    let allowsZero: Bool
+    var title: String = "Width"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            LineWidthStepperControl(value: $width, step: step, max: max, allowsZero: allowsZero)
+        }
+        .padding(16)
+        .frame(width: 280)
     }
 }
 

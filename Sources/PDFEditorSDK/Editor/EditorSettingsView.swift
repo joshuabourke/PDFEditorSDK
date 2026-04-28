@@ -15,6 +15,9 @@ struct EditorSettingsView: View {
     @Binding var pencilDoubleTapAction: PencilGestureAction
     @Binding var pencilSqueezeAction: PencilGestureAction
     @Binding var pencilDoubleSqueezeAction: PencilGestureAction
+    @Binding var lineWidthInputStyle: LineWidthInputStyle
+    @Binding var lineWidthStep: CGFloat
+    @Binding var lineWidthMax: CGFloat
 
     var body: some View {
         ScrollView {
@@ -119,6 +122,69 @@ struct EditorSettingsView: View {
                 )
                 .onChange(of: pencilDoubleSqueezeAction) { _, newValue in
                     clearConflictsForDoubleSqueeze(newValue)
+                }
+
+                // MARK: - Line & border width
+
+                Divider()
+
+                Text("Line & border width")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Control style")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Picker("Control style", selection: $lineWidthInputStyle) {
+                        ForEach(LineWidthInputStyle.allCases) { style in
+                            Text(style.displayName).tag(style)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                if lineWidthInputStyle == .stepper {
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Step size")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Picker("Step size", selection: $lineWidthStep) {
+                            Text("0.25 pt").tag(CGFloat(0.25))
+                            Text("0.5 pt").tag(CGFloat(0.5))
+                            Text("1 pt").tag(CGFloat(1))
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Maximum width")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                        Picker("Maximum width", selection: $lineWidthMax) {
+                            Text("12 pt").tag(CGFloat(12))
+                            Text("24 pt").tag(CGFloat(24))
+                            Text("36 pt").tag(CGFloat(36))
+                            Text("48 pt").tag(CGFloat(48))
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
             }
         }

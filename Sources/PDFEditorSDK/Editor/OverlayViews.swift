@@ -9,6 +9,27 @@ import SwiftUI
 import PDFKit
 import UIKit
 
+/// Default `UIView.hitTest` ignores touches outside the view’s `bounds`, so subviews laid out past the edge (move/resize handles) never receive them. Call `superHitTest` when the point is inside `bounds`; otherwise ask subviews in z-order.
+private func overlayHitTestForwardingOutOfBounds(
+    host: UIView,
+    point: CGPoint,
+    event: UIEvent?,
+    superHitTest: (CGPoint, UIEvent?) -> UIView?
+) -> UIView? {
+    guard host.isUserInteractionEnabled, !host.isHidden, host.alpha > 0.01 else { return nil }
+    if host.point(inside: point, with: event) {
+        return superHitTest(point, event)
+    }
+    for sub in host.subviews.reversed() {
+        guard sub.isUserInteractionEnabled, !sub.isHidden, sub.alpha > 0.01 else { continue }
+        let p = sub.convert(point, from: host)
+        if let hit = sub.hitTest(p, with: event) {
+            return hit
+        }
+    }
+    return nil
+}
+
 final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelegate {
     private let textView = UITextView()
     /// Added only while Scribble should be suppressed; `UITextView` has no `isScribbleEnabled` (unlike `UITextField`).
@@ -16,8 +37,10 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     private let padding = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
     private let moveHandle = UIView()
     private let moveIcon = UIImageView()
-    private let resizeHandle = UIView()
+    private let resizeHitTarget = ResizeHandleHitTargetView()
+    private let resizeHandleVisual = UIView()
     private let resizeIcon = UIImageView()
+    private let resizeVisualSize: CGFloat = 24
     private var isSelected: Bool = false {
         didSet { updateSelectionUI() }
     }
@@ -35,6 +58,10 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     var currentVerticalAlignment: TextVerticalAlignment { _verticalAlignment }
     private var _autoResizeEnabled: Bool = false
     var currentAutoResize: Bool { _autoResizeEnabled }
+    private var _borderWidth: CGFloat = 0
+    private var _borderColor: UIColor = .black
+    var currentBorderWidth: CGFloat { _borderWidth }
+    var currentBorderColor: UIColor { _borderColor }
     private let overflowIndicator = UIImageView()
     var onSelect: ((UUID) -> Void)?
     /// Called when the embedded `UITextView` gains or loses first responder (keyboard show/hide).
@@ -62,8 +89,7 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     private func setup() {
         layer.zPosition = 1
         layer.cornerRadius = 6
-        layer.borderWidth = 1
-        layer.borderColor = UIColor.systemGray4.cgColor
+        applyUserBorder()
         
         textView.backgroundColor = .clear
         textView.font = UIFont.systemFont(ofSize: 14)
@@ -84,15 +110,17 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         moveHandle.addSubview(moveIcon)
         addSubview(moveHandle)
         
-        resizeHandle.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.12)
-        resizeHandle.layer.cornerRadius = 6
-        resizeHandle.layer.borderWidth = 1
-        resizeHandle.layer.borderColor = UIColor.systemOrange.cgColor
+        resizeHandleVisual.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.12)
+        resizeHandleVisual.layer.cornerRadius = 6
+        resizeHandleVisual.layer.borderWidth = 1
+        resizeHandleVisual.layer.borderColor = UIColor.systemOrange.cgColor
         resizeIcon.image = UIImage(systemName: "arrow.up.left.and.down.right")
         resizeIcon.tintColor = UIColor.systemOrange
         resizeIcon.contentMode = .scaleAspectFit
-        resizeHandle.addSubview(resizeIcon)
-        addSubview(resizeHandle)
+        resizeHandleVisual.addSubview(resizeIcon)
+        resizeHitTarget.addSubview(resizeHandleVisual)
+        addSubview(resizeHitTarget)
+        resizeHitTarget.isUserInteractionEnabled = true
         
         let movePan = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))
         moveHandle.addGestureRecognizer(movePan)
@@ -105,8 +133,7 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         self.bodyMovePan = bodyMovePan
         
         let resizePan = UIPanGestureRecognizer(target: self, action: #selector(handleResizePan(_:)))
-        resizeHandle.addGestureRecognizer(resizePan)
-        resizeHandle.isUserInteractionEnabled = true
+        resizeHitTarget.addGestureRecognizer(resizePan)
         resizeHandlePan = resizePan
         
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelect))
@@ -128,6 +155,12 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
 
         isSelected = true
     }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        overlayHitTestForwardingOutOfBounds(host: self, point: point, event: event) { p, e in
+            super.hitTest(p, with: e)
+        }
+    }
     
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -137,13 +170,15 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         let handleSize: CGFloat = 16
         moveHandle.frame = CGRect(x: -6, y: -6, width: handleSize, height: handleSize)
         moveIcon.frame = moveHandle.bounds.insetBy(dx: 2, dy: 2)
-        resizeHandle.frame = CGRect(
-            x: bounds.width - handleSize + 6,
-            y: bounds.height - handleSize + 6,
-            width: handleSize,
-            height: handleSize
+        let v = resizeVisualSize
+        resizeHitTarget.frame = CGRect(
+            x: bounds.width - v + 6,
+            y: bounds.height - v + 6,
+            width: v,
+            height: v
         )
-        resizeIcon.frame = resizeHandle.bounds.insetBy(dx: 2, dy: 2)
+        resizeHandleVisual.frame = resizeHitTarget.bounds
+        resizeIcon.frame = resizeHandleVisual.bounds.insetBy(dx: 3, dy: 3)
 
         let indicatorSize: CGFloat = 18
         overflowIndicator.frame = CGRect(
@@ -174,6 +209,18 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         _autoResizeEnabled = enabled
         if enabled { autoExpandIfNeeded() }
         updateOverflowIndicator()
+    }
+
+    func updateBorder(width: CGFloat, color: UIColor) {
+        _borderWidth = width
+        _borderColor = color
+        applyUserBorder()
+    }
+
+    private func applyUserBorder() {
+        guard !isSelected else { return }
+        layer.borderWidth = _borderWidth > 0 ? _borderWidth : 0
+        layer.borderColor = _borderWidth > 0 ? _borderColor.cgColor : UIColor.clear.cgColor
     }
 
     /// Grows the text box height vertically to fit the current text content.
@@ -282,13 +329,15 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     private func updateSelectionUI() {
         let alpha: CGFloat = (isSelectMode && isSelected) ? 1.0 : 0.0
         moveHandle.alpha = alpha
-        resizeHandle.alpha = alpha
+        resizeHitTarget.alpha = alpha
         if isSelectMode && isSelected {
+            layer.borderWidth = max(_borderWidth, 1)
             layer.borderColor = UIColor.systemBlue.cgColor
         } else if isSelected {
+            layer.borderWidth = max(_borderWidth, 1)
             layer.borderColor = UIColor.systemBlue.withAlphaComponent(0.45).cgColor
         } else {
-            layer.borderColor = UIColor.systemGray4.cgColor
+            applyUserBorder()
         }
     }
     
@@ -410,7 +459,8 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
 
 /// Expands the tappable region beyond the visible resize knob (UIKit hit-testing uses `point(inside:with:)`).
 private final class ResizeHandleHitTargetView: UIView {
-    static let expansion: CGFloat = 12
+    /// Extra points beyond the visible handle bounds that still count as a hit (easier to grab when resizing).
+    static let expansion: CGFloat = 18
     
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         bounds.insetBy(dx: -Self.expansion, dy: -Self.expansion).contains(point)
@@ -427,7 +477,7 @@ final class ImageBoxView: UIView {
     private var pinchGesture: UIPinchGestureRecognizer?
     private let resizeFeedback = UIImpactFeedbackGenerator(style: .light)
     private let minSize = CGSize(width: 80, height: 80)
-    private let resizeVisualSize: CGFloat = 22
+    private let resizeVisualSize: CGFloat = 24
     private var pinchStartFrame: CGRect = .zero
     
     let id: UUID
@@ -502,6 +552,12 @@ final class ImageBoxView: UIView {
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelect))
         addGestureRecognizer(tap)
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        overlayHitTestForwardingOutOfBounds(host: self, point: point, event: event) { p, e in
+            super.hitTest(p, with: e)
+        }
     }
     
     override func layoutSubviews() {
@@ -721,7 +777,7 @@ final class ShapeBoxView: UIView {
     private var pinchGesture: UIPinchGestureRecognizer?
     private let resizeFeedback = UIImpactFeedbackGenerator(style: .light)
     private let minSize = CGSize(width: 30, height: 30)
-    private let resizeVisualSize: CGFloat = 22
+    private let resizeVisualSize: CGFloat = 24
     private var pinchStartFrame: CGRect = .zero
     private var startFrame: CGRect = .zero
 
@@ -803,6 +859,12 @@ final class ShapeBoxView: UIView {
         addGestureRecognizer(tap)
 
         updateHandleVisibility()
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        overlayHitTestForwardingOutOfBounds(host: self, point: point, event: event) { p, e in
+            super.hitTest(p, with: e)
+        }
     }
 
     override func layoutSubviews() {

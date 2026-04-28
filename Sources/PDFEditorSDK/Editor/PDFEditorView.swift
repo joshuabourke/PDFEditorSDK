@@ -80,6 +80,9 @@ struct PDFFormEditorView: View {
     @State private var showEraserOptions = false
     @State private var showAddImageSourceDialog = false
     @State private var showImageBorderOptions = false
+    @State private var showSelectShapeLineWidthPopover = false
+    @State private var showSelectImageBorderWidthPopover = false
+    @State private var showSelectTextBorderWidthPopover = false
 
     ///This is tracking to see if the user has made changes to a document, this is used to display an alert if they attempt to exit without saving.
     @State private var changesNotSaved: Bool = false
@@ -129,11 +132,8 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxTextAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxVerticalAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
-            .onChange(of: viewModel.selectedTextBoxAutoResize) { _, _ in viewModel.applyAutoResizeToSelectedTextBox() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
-            .onChange(of: viewModel.imageBorderWidth) { _, _ in viewModel.applyImageBorderToSelected() }
-            .onChange(of: viewModel.imageBorderColor) { _, _ in viewModel.applyImageBorderToSelected() }
             .alert("Unsaved Changes", isPresented: $changesNotSaved) {
                 Button("Save Changes") {
                     viewModel.savePDF()
@@ -384,7 +384,10 @@ struct PDFFormEditorView: View {
                                     get: { Color(viewModel.inkColor) },
                                     set: { viewModel.inkColor = UIColor($0) }
                                 ),
-                                inkLineWidth: $viewModel.inkLineWidth
+                                inkLineWidth: $viewModel.inkLineWidth,
+                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                                lineWidthStep: viewModel.lineWidthStep,
+                                lineWidthMax: viewModel.lineWidthMax
                             )
                         }
                     }
@@ -477,7 +480,15 @@ struct PDFFormEditorView: View {
                                 isBold: $viewModel.textBoxIsBold,
                                 textAlignment: $viewModel.textBoxTextAlignment,
                                 verticalAlignment: $viewModel.textBoxVerticalAlignment,
-                                autoResize: $viewModel.textBoxAutoResize
+                                autoResize: $viewModel.textBoxAutoResize,
+                                borderWidth: $viewModel.textBoxBorderWidth,
+                                borderColor: Binding(
+                                    get: { Color(viewModel.textBoxBorderColor) },
+                                    set: { viewModel.textBoxBorderColor = UIColor($0) }
+                                ),
+                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                                lineWidthStep: viewModel.lineWidthStep,
+                                lineWidthMax: viewModel.lineWidthMax
                             )
                         }
                     }
@@ -522,11 +533,17 @@ struct PDFFormEditorView: View {
                         )
                         .popover(isPresented: $showImageBorderOptions, arrowEdge: .top) {
                             ImageBorderToolOptionsView(
-                                borderWidth: $viewModel.imageBorderWidth,
+                                borderWidth: Binding(
+                                    get: { viewModel.imageBorderWidth },
+                                    set: { viewModel.commitImageBorderWidth($0) }
+                                ),
                                 borderColor: Binding(
                                     get: { Color(viewModel.imageBorderColor) },
-                                    set: { viewModel.imageBorderColor = UIColor($0) }
-                                )
+                                    set: { viewModel.commitImageBorderColor(UIColor($0)) }
+                                ),
+                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                                lineWidthStep: viewModel.lineWidthStep,
+                                lineWidthMax: viewModel.lineWidthMax
                             )
                         }
                         .confirmationDialog(
@@ -611,7 +628,10 @@ struct PDFFormEditorView: View {
                                 pencilOnlyAnnotations: $viewModel.pencilOnlyAnnotations,
                                 pencilDoubleTapAction: $viewModel.pencilDoubleTapAction,
                                 pencilSqueezeAction: $viewModel.pencilSqueezeAction,
-                                pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction
+                                pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction,
+                                lineWidthInputStyle: $viewModel.lineWidthInputStyle,
+                                lineWidthStep: $viewModel.lineWidthStep,
+                                lineWidthMax: $viewModel.lineWidthMax
                             )
                         }
                     }
@@ -714,7 +734,10 @@ struct PDFFormEditorView: View {
                         get: { Color(viewModel.shapeStrokeColor) },
                         set: { viewModel.shapeStrokeColor = UIColor($0) }
                     ),
-                    lineWidth: $viewModel.shapeLineWidth
+                    lineWidth: $viewModel.shapeLineWidth,
+                    lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                    lineWidthStep: viewModel.lineWidthStep,
+                    lineWidthMax: viewModel.lineWidthMax
                 )
             }
         }
@@ -779,43 +802,99 @@ struct PDFFormEditorView: View {
     }
 
     @ViewBuilder
+    private var selectImageBorderWidthChipLabel: some View {
+        toolbarChip {
+            Image(systemName: "square.dashed").fontWeight(.semibold)
+            Text(
+                LineWidthFormatting.toolbarPointsLabel(
+                    viewModel.imageBorderWidth,
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep
+                )
+            )
+            .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(4)
+        .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
+    }
+
+    @ViewBuilder
     private var selectImageSubtools: some View {
-        HStack(alignment: .center, spacing: 8) {
+        ToolbarSubtoolsScrollRow {
             ColorPicker("", selection: Binding(
                 get: { Color(viewModel.imageBorderColor) },
-                set: { viewModel.imageBorderColor = UIColor($0) }
+                set: { viewModel.commitImageBorderColor(UIColor($0)) }
             ))
             .labelsHidden()
             .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
 
-            Menu {
-                Button("None") { viewModel.imageBorderWidth = 0 }
-                Button("Thin (1pt)") { viewModel.imageBorderWidth = 1 }
-                Button("Medium (2pt)") { viewModel.imageBorderWidth = 2 }
-                Button("Thick (4pt)") { viewModel.imageBorderWidth = 4 }
-                Button("Heavy (6pt)") { viewModel.imageBorderWidth = 6 }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "square.dashed").fontWeight(.semibold)
-                    Text(viewModel.imageBorderWidth == 0 ? "No Border" : "\(Int(viewModel.imageBorderWidth))pt")
-                        .fontWeight(.semibold)
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("None") { viewModel.commitImageBorderWidth(0) }
+                            Button("Thin (1pt)") { viewModel.commitImageBorderWidth(1) }
+                            Button("Medium (2pt)") { viewModel.commitImageBorderWidth(2) }
+                            Button("Thick (4pt)") { viewModel.commitImageBorderWidth(4) }
+                            Button("Heavy (6pt)") { viewModel.commitImageBorderWidth(6) }
+                        }
+                    } label: {
+                        selectImageBorderWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showSelectImageBorderWidthPopover = true
+                    } label: {
+                        selectImageBorderWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showSelectImageBorderWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: Binding(
+                                get: { viewModel.imageBorderWidth },
+                                set: { viewModel.commitImageBorderWidth($0) }
+                            ),
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: true,
+                            title: "Border width"
+                        )
+                    }
                 }
-                .foregroundStyle(Color.accentColor)
-                .padding(4)
-                .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
             }
         }
     }
     
     @ViewBuilder
+    private var selectTextBoxBorderWidthChipLabel: some View {
+        toolbarChip {
+            Image(systemName: "square.dashed").fontWeight(.semibold)
+            Text(
+                LineWidthFormatting.toolbarPointsLabel(
+                    viewModel.selectedTextBoxBorderWidth,
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep
+                )
+            )
+            .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(4)
+        .background(toolbarChipBackground(isActive: viewModel.selectedTextBoxBorderWidth > 0))
+    }
+
+    @ViewBuilder
     private var selectTextBoxSubtools: some View {
-        HStack(alignment: .center, spacing: 8) {
+        ToolbarSubtoolsScrollRow {
             Menu {
-                Button("Black") { viewModel.textBoxTextColor = .label }
-                Button("White") { viewModel.textBoxTextColor = .white }
-                Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
-                Button("Red") { viewModel.textBoxTextColor = .systemRed }
-                Button("Green") { viewModel.textBoxTextColor = .systemGreen }
+                MenuScrollableActions {
+                    Button("Black") { viewModel.textBoxTextColor = .label }
+                    Button("White") { viewModel.textBoxTextColor = .white }
+                    Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
+                    Button("Red") { viewModel.textBoxTextColor = .systemRed }
+                    Button("Green") { viewModel.textBoxTextColor = .systemGreen }
+                }
             } label: {
                 toolbarChip {
                     Image(systemName: "square.fill")
@@ -826,12 +905,14 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
             Menu {
-                Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
-                Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
-                Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
-                Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
-                Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
-                Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+                MenuScrollableActions {
+                    Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
+                    Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
+                    Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
+                    Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
+                    Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
+                    Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+                }
             } label: {
                 toolbarChip {
                     Image(systemName: "square.fill")
@@ -842,10 +923,12 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
             Menu {
-                Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
-                Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
-                Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
-                Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
+                MenuScrollableActions {
+                    Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
+                    Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
+                    Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
+                    Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
+                }
             } label: {
                 toolbarChip {
                     Image(systemName: "textformat.size").font(.title3).fontWeight(.semibold)
@@ -862,20 +945,22 @@ struct PDFFormEditorView: View {
             }
             .buttonStyle(.plain)
             Menu {
-                Button {
-                    viewModel.textBoxTextAlignment = .left
-                } label: {
-                    Label("Leading", systemImage: "text.alignleft")
-                }
-                Button {
-                    viewModel.textBoxTextAlignment = .center
-                } label: {
-                    Label("Center", systemImage: "text.aligncenter")
-                }
-                Button {
-                    viewModel.textBoxTextAlignment = .right
-                } label: {
-                    Label("Trailing", systemImage: "text.alignright")
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxTextAlignment = .left
+                    } label: {
+                        Label("Leading", systemImage: "text.alignleft")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .center
+                    } label: {
+                        Label("Center", systemImage: "text.aligncenter")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .right
+                    } label: {
+                        Label("Trailing", systemImage: "text.alignright")
+                    }
                 }
             } label: {
                 toolbarChip {
@@ -886,20 +971,22 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
             Menu {
-                Button {
-                    viewModel.textBoxVerticalAlignment = .top
-                } label: {
-                    Label("Top", systemImage: "arrow.up.to.line")
-                }
-                Button {
-                    viewModel.textBoxVerticalAlignment = .middle
-                } label: {
-                    Label("Middle", systemImage: "arrow.up.and.down")
-                }
-                Button {
-                    viewModel.textBoxVerticalAlignment = .bottom
-                } label: {
-                    Label("Bottom", systemImage: "arrow.down.to.line")
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .top
+                    } label: {
+                        Label("Top", systemImage: "arrow.up.to.line")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .middle
+                    } label: {
+                        Label("Middle", systemImage: "arrow.up.and.down")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .bottom
+                    } label: {
+                        Label("Bottom", systemImage: "arrow.down.to.line")
+                    }
                 }
             } label: {
                 toolbarChip {
@@ -910,7 +997,7 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
 
-            Button { viewModel.selectedTextBoxAutoResize.toggle() } label: {
+            Button { viewModel.toggleSelectedTextBoxAutoResize() } label: {
                 toolbarChip {
                     Image(systemName: "arrow.up.and.down")
                         .font(.title3).fontWeight(.semibold)
@@ -919,6 +1006,48 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.selectedTextBoxAutoResize))
             }
             .buttonStyle(.plain)
+
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.selectedTextBoxBorderColor) },
+                set: { viewModel.commitSelectedTextBoxBorderColor(UIColor($0)) }
+            ))
+            .labelsHidden()
+            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("None") { viewModel.commitSelectedTextBoxBorderWidth(0) }
+                            Button("Thin (1pt)") { viewModel.commitSelectedTextBoxBorderWidth(1) }
+                            Button("Medium (2pt)") { viewModel.commitSelectedTextBoxBorderWidth(2) }
+                            Button("Thick (4pt)") { viewModel.commitSelectedTextBoxBorderWidth(4) }
+                            Button("Heavy (6pt)") { viewModel.commitSelectedTextBoxBorderWidth(6) }
+                        }
+                    } label: {
+                        selectTextBoxBorderWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showSelectTextBorderWidthPopover = true
+                    } label: {
+                        selectTextBoxBorderWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showSelectTextBorderWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: Binding(
+                                get: { viewModel.selectedTextBoxBorderWidth },
+                                set: { viewModel.commitSelectedTextBoxBorderWidth($0) }
+                            ),
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: true,
+                            title: "Border width"
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -939,25 +1068,59 @@ struct PDFFormEditorView: View {
     }
 
     @ViewBuilder
+    private var selectShapeLineWidthChipLabel: some View {
+        toolbarChip {
+            Image(systemName: "lineweight").fontWeight(.semibold)
+            Text(
+                LineWidthFormatting.shapeStrokeLabel(
+                    viewModel.shapeLineWidth,
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep
+                )
+            )
+            .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+    }
+
+    @ViewBuilder
     private var selectShapeSubtools: some View {
-        HStack(alignment: .center, spacing: 8) {
+        ToolbarSubtoolsScrollRow {
             ColorPicker("", selection: Binding(
                 get: { Color(viewModel.shapeStrokeColor) },
                 set: { viewModel.shapeStrokeColor = UIColor($0) }
             ))
             .labelsHidden()
             .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-            Menu {
-                Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
-                Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
-                Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
-                Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "lineweight").fontWeight(.semibold)
-                    Text("\(Int(viewModel.shapeLineWidth))pt").fontWeight(.semibold)
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                            Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                            Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                            Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+                        }
+                    } label: {
+                        selectShapeLineWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showSelectShapeLineWidthPopover = true
+                    } label: {
+                        selectShapeLineWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showSelectShapeLineWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: $viewModel.shapeLineWidth,
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: false,
+                            title: "Stroke width"
+                        )
+                    }
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
             }
         }
     }
@@ -1141,6 +1304,8 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.textBoxTextAlignment = viewModel.textBoxTextAlignment
         pdfView.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
         pdfView.textBoxAutoResize = viewModel.textBoxAutoResize
+        pdfView.textBoxBorderWidth = viewModel.textBoxBorderWidth
+        pdfView.textBoxBorderColor = viewModel.textBoxBorderColor
         pdfView.isShapeMode = viewModel.activeTool == .shape
         pdfView.currentShapeKind = viewModel.activeShapeKind
         pdfView.shapeStrokeColor = viewModel.shapeStrokeColor

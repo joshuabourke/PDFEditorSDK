@@ -52,6 +52,15 @@ class PDFFormViewModel {
     var textBoxVerticalAlignment: TextVerticalAlignment {
         didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
     }
+    var textBoxBorderWidth: CGFloat {
+        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; preferences.save() }
+    }
+    var textBoxBorderColor: UIColor {
+        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); preferences.save() }
+    }
+    /// Reflects the border state of the currently selected text box (not persisted — synced on selection).
+    var selectedTextBoxBorderWidth: CGFloat = 0
+    var selectedTextBoxBorderColor: UIColor = .black
     var activeShapeKind: OverlayShapeKind {
         didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
     }
@@ -83,7 +92,38 @@ class PDFFormViewModel {
         didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
     }
     var previousTool: EditorTool? = nil
-    var isThumbnailOverlayVisible: Bool = true
+    var isThumbnailOverlayVisible: Bool {
+        didSet { preferences.isThumbnailOverlayVisible = isThumbnailOverlayVisible; preferences.save() }
+    }
+    var lineWidthInputStyle: LineWidthInputStyle {
+        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
+    }
+    var lineWidthStep: CGFloat {
+        didSet {
+            var p = preferences
+            p.lineWidthStep = lineWidthStep
+            p.normalizeLineWidthControlFields()
+            if p.lineWidthStep != lineWidthStep {
+                lineWidthStep = p.lineWidthStep
+                return
+            }
+            preferences.lineWidthStep = p.lineWidthStep
+            preferences.save()
+        }
+    }
+    var lineWidthMax: CGFloat {
+        didSet {
+            var p = preferences
+            p.lineWidthMax = lineWidthMax
+            p.normalizeLineWidthControlFields()
+            if p.lineWidthMax != lineWidthMax {
+                lineWidthMax = p.lineWidthMax
+                return
+            }
+            preferences.lineWidthMax = p.lineWidthMax
+            preferences.save()
+        }
+    }
     var saveStatus: String?
     var exportStatus: String?
     var openStatus: String?
@@ -129,6 +169,8 @@ class PDFFormViewModel {
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
         self.textBoxAutoResize = prefs.textBoxAutoResize
+        self.textBoxBorderWidth = prefs.textBoxBorderWidth
+        self.textBoxBorderColor = prefs.textBoxBorderColor.uiColor
 
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeStrokeColor = prefs.shapeStrokeColor.uiColor
@@ -142,6 +184,11 @@ class PDFFormViewModel {
         self.pencilDoubleTapAction = prefs.pencilDoubleTapAction
         self.pencilSqueezeAction = prefs.pencilSqueezeAction
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
+        self.isThumbnailOverlayVisible = prefs.isThumbnailOverlayVisible
+
+        self.lineWidthInputStyle = prefs.lineWidthInputStyle
+        self.lineWidthStep = prefs.lineWidthStep
+        self.lineWidthMax = prefs.lineWidthMax
 
         _ = loadPDF(from: documentURL)
         
@@ -222,7 +269,38 @@ class PDFFormViewModel {
     func applyImageBorderToSelected() {
         pdfView?.applyImageBorderToSelected(borderWidth: imageBorderWidth, borderColor: imageBorderColor)
     }
-    
+
+    func applyTextBorderToSelected() {
+        pdfView?.applyTextBorderToSelected(borderWidth: selectedTextBoxBorderWidth, borderColor: selectedTextBoxBorderColor)
+    }
+
+    /// Updates width + canvas; use from toolbar instead of assigning `selectedTextBoxBorderWidth` so selection sync does not go through `.onChange`.
+    func commitSelectedTextBoxBorderWidth(_ width: CGFloat) {
+        selectedTextBoxBorderWidth = width
+        applyTextBorderToSelected()
+    }
+
+    /// Updates color + canvas; use from toolbar instead of assigning `selectedTextBoxBorderColor` so selection sync does not go through `.onChange`.
+    func commitSelectedTextBoxBorderColor(_ color: UIColor) {
+        selectedTextBoxBorderColor = color
+        applyTextBorderToSelected()
+    }
+
+    func toggleSelectedTextBoxAutoResize() {
+        selectedTextBoxAutoResize.toggle()
+        applyAutoResizeToSelectedTextBox()
+    }
+
+    func commitImageBorderWidth(_ width: CGFloat) {
+        imageBorderWidth = width
+        applyImageBorderToSelected()
+    }
+
+    func commitImageBorderColor(_ color: UIColor) {
+        imageBorderColor = color
+        applyImageBorderToSelected()
+    }
+
     func toggleScrollLock() {
         pageScrollLocked.toggle()
     }
@@ -387,6 +465,11 @@ class PDFFormViewModel {
                 return .overlayShape(add: current, remove: remove)
             }
             return action
+        case .overlayTextBoxUpdate(let before, let after):
+            if let current = pdfView?.overlayTextBoxState(id: after.id) {
+                return .overlayTextBoxUpdate(before: before, after: current)
+            }
+            return action
         default:
             return action
         }
@@ -411,6 +494,8 @@ class PDFFormViewModel {
                 if let remove {
                     pdfView?.addOverlayTextBox(from: remove)
                 }
+            case .overlayTextBoxUpdate(let before, _):
+                pdfView?.updateOverlayTextBox(from: before)
             case .moveAnnotation(let ann, let from, _):
                 pdfView?.suppressGoTo = true
                 ann.bounds = from
@@ -464,6 +549,8 @@ class PDFFormViewModel {
                 if let remove {
                     pdfView?.removeOverlayTextBox(id: remove.id)
                 }
+            case .overlayTextBoxUpdate(_, let after):
+                pdfView?.updateOverlayTextBox(from: after)
             case .moveAnnotation(let ann, _, let to):
                 pdfView?.suppressGoTo = true
                 ann.bounds = to
@@ -552,6 +639,7 @@ class PDFFormViewModel {
             saveStatus = "Failed to save PDF"
             return nil
         }
+        patchNeedAppearances(at: stagingURL)
 
         do {
             let finalURL = try finalizeGeneratedFile(
@@ -639,9 +727,7 @@ class PDFFormViewModel {
                     cg.translateBy(x: 0, y: bounds.height)
                     cg.scaleBy(x: 1, y: -1)
                     
-                    let removedWidgetAnnotations = removeWidgetAnnotations(from: page)
                     page.draw(with: .mediaBox, to: cg)
-                    restoreWidgetAnnotations(removedWidgetAnnotations, to: page)
                     
                     let textItems = metadata.textBoxes.filter { $0.pageIndex == pageIndex }
                     for item in textItems {
@@ -665,6 +751,18 @@ class PDFFormViewModel {
                             verticalAlignment: TextVerticalAlignment(rawValue: item.verticalAlignment ?? "") ?? .top,
                             context: cg
                         )
+
+                        // Draw configurable border
+                        if let bw = item.borderWidth, bw > 0 {
+                            let bc = item.borderColor?.uiColor ?? UIColor.black
+                            cg.saveGState()
+                            cg.setStrokeColor(bc.cgColor)
+                            cg.setLineWidth(bw)
+                            let borderPath = UIBezierPath(roundedRect: rect.insetBy(dx: bw / 2, dy: bw / 2), cornerRadius: textCornerRadius)
+                            cg.addPath(borderPath.cgPath)
+                            cg.strokePath()
+                            cg.restoreGState()
+                        }
                     }
                     
                     let imageItems = metadata.images.filter { $0.pageIndex == pageIndex }
@@ -779,20 +877,16 @@ class PDFFormViewModel {
         return CGRect(origin: origin, size: size)
     }
 
-    private func removeWidgetAnnotations(from page: PDFPage) -> [PDFAnnotation] {
-        let widgets = page.annotations.filter {
-            $0.type == PDFAnnotationSubtype.widget.rawValue || !$0.widgetFieldType.rawValue.isEmpty
-        }
-        for annotation in widgets {
-            page.removeAnnotation(annotation)
-        }
-        return widgets
-    }
-    
-    private func restoreWidgetAnnotations(_ widgets: [PDFAnnotation], to page: PDFPage) {
-        for annotation in widgets {
-            page.addAnnotation(annotation)
-        }
+    /// Sets /NeedAppearances to false in the saved PDF so Windows viewers (Adobe, Chrome)
+    /// do not re-render form-field text on top of the existing appearance streams.
+    /// The target and replacement strings are the same byte length, so no offset patching is needed.
+    private func patchNeedAppearances(at url: URL) {
+        guard var data = try? Data(contentsOf: url) else { return }
+        let target = Data("/NeedAppearances true".utf8)
+        let replacement = Data("/NeedAppearances false".utf8)
+        guard let range = data.range(of: target) else { return }
+        data.replaceSubrange(range, with: replacement)
+        try? data.write(to: url)
     }
 
     private func defaultFileName(for kind: PDFEditorDocumentKind) -> String {

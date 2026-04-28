@@ -42,6 +42,7 @@ final class ImageCropViewController: UIViewController {
     private var didSetInitialLayout = false
     private var activeHandle: Handle = .none
     private let minCropSize: CGFloat = 60
+    private var pinchStartCropRect: CGRect = .zero
 
     // MARK: - Init
 
@@ -171,6 +172,9 @@ final class ImageCropViewController: UIViewController {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.maximumNumberOfTouches = 1
         imageContainerView.addGestureRecognizer(pan)
+
+        let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        imageContainerView.addGestureRecognizer(pinch)
     }
 
     // MARK: - Image Display Rect
@@ -223,22 +227,73 @@ final class ImageCropViewController: UIViewController {
         }
     }
 
+    @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
+        let imageBounds = imageDisplayRect()
+        switch gesture.state {
+        case .began:
+            pinchStartCropRect = cropRect
+            overlay.isDragging = true
+            overlay.setNeedsDisplay()
+        case .changed:
+            let scaled = cropRectForUniformPinch(
+                start: pinchStartCropRect,
+                scale: gesture.scale,
+                inside: imageBounds,
+                minSize: minCropSize
+            )
+            cropRect = scaled
+        case .ended, .cancelled:
+            overlay.isDragging = false
+            overlay.setNeedsDisplay()
+            gesture.scale = 1
+        default:
+            break
+        }
+    }
+
+    /// Uniform scale around the start rect’s center, clamped to `inside` and `minSize`.
+    private func cropRectForUniformPinch(start: CGRect, scale: CGFloat, inside imageBounds: CGRect, minSize: CGFloat) -> CGRect {
+        guard start.width > 1, start.height > 1, scale > 0 else { return start }
+        let c = CGPoint(x: start.midX, y: start.midY)
+        var w = max(minSize, start.width * scale)
+        var h = max(minSize, start.height * scale)
+        // Stay inside image bounds while keeping aspect (same scale on both axes from pinch).
+        let maxW = 2 * min(c.x - imageBounds.minX, imageBounds.maxX - c.x)
+        let maxH = 2 * min(c.y - imageBounds.minY, imageBounds.maxY - c.y)
+        let s = min(1, min(maxW / w, maxH / h))
+        w *= s
+        h *= s
+        var x = c.x - w / 2
+        var y = c.y - h / 2
+        x = max(imageBounds.minX, min(x, imageBounds.maxX - w))
+        y = max(imageBounds.minY, min(y, imageBounds.maxY - h))
+        return CGRect(x: x, y: y, width: w, height: h)
+    }
+
     private func handle(at point: CGPoint) -> Handle {
         let r = cropRect
-        let hitRadius: CGFloat = 22
+        // Explicit hit rects so touches slightly outside the crop (past corners/edges) still grab handles.
+        let cornerExtent: CGFloat = 34
+        let edgeHalfWidth: CGFloat = 48
+        let edgeHalfDepth: CGFloat = 32
 
-        func near(_ p: CGPoint) -> Bool {
-            abs(point.x - p.x) < hitRadius && abs(point.y - p.y) < hitRadius
-        }
+        let cornerSize = cornerExtent * 2
+        let corners: [(CGRect, Handle)] = [
+            (CGRect(x: r.minX - cornerExtent, y: r.minY - cornerExtent, width: cornerSize, height: cornerSize), .topLeft),
+            (CGRect(x: r.maxX - cornerExtent, y: r.minY - cornerExtent, width: cornerSize, height: cornerSize), .topRight),
+            (CGRect(x: r.minX - cornerExtent, y: r.maxY - cornerExtent, width: cornerSize, height: cornerSize), .bottomLeft),
+            (CGRect(x: r.maxX - cornerExtent, y: r.maxY - cornerExtent, width: cornerSize, height: cornerSize), .bottomRight),
+        ]
+        for (rect, h) in corners where rect.contains(point) { return h }
 
-        if near(CGPoint(x: r.minX, y: r.minY)) { return .topLeft }
-        if near(CGPoint(x: r.midX, y: r.minY)) { return .topCenter }
-        if near(CGPoint(x: r.maxX, y: r.minY)) { return .topRight }
-        if near(CGPoint(x: r.minX, y: r.midY)) { return .middleLeft }
-        if near(CGPoint(x: r.maxX, y: r.midY)) { return .middleRight }
-        if near(CGPoint(x: r.minX, y: r.maxY)) { return .bottomLeft }
-        if near(CGPoint(x: r.midX, y: r.maxY)) { return .bottomCenter }
-        if near(CGPoint(x: r.maxX, y: r.maxY)) { return .bottomRight }
+        let edges: [(CGRect, Handle)] = [
+            (CGRect(x: r.midX - edgeHalfWidth, y: r.minY - edgeHalfDepth, width: edgeHalfWidth * 2, height: edgeHalfDepth * 2), .topCenter),
+            (CGRect(x: r.midX - edgeHalfWidth, y: r.maxY - edgeHalfDepth, width: edgeHalfWidth * 2, height: edgeHalfDepth * 2), .bottomCenter),
+            (CGRect(x: r.minX - edgeHalfDepth, y: r.midY - edgeHalfWidth, width: edgeHalfDepth * 2, height: edgeHalfWidth * 2), .middleLeft),
+            (CGRect(x: r.maxX - edgeHalfDepth, y: r.midY - edgeHalfWidth, width: edgeHalfDepth * 2, height: edgeHalfWidth * 2), .middleRight),
+        ]
+        for (rect, h) in edges where rect.contains(point) { return h }
+
         if r.contains(point) { return .move }
         return .none
     }
@@ -409,7 +464,7 @@ private final class CropOverlayView: UIView {
 
         // Edge midpoint handles
         ctx.setLineWidth(2.5)
-        let em: CGFloat = 14
+        let em: CGFloat = 20
         ctx.move(to: CGPoint(x: r.midX - em, y: r.minY)); ctx.addLine(to: CGPoint(x: r.midX + em, y: r.minY))
         ctx.move(to: CGPoint(x: r.midX - em, y: r.maxY)); ctx.addLine(to: CGPoint(x: r.midX + em, y: r.maxY))
         ctx.move(to: CGPoint(x: r.minX, y: r.midY - em)); ctx.addLine(to: CGPoint(x: r.minX, y: r.midY + em))

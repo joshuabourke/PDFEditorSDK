@@ -47,6 +47,14 @@ class ImageEditorViewModel {
     var textBoxAutoResize: Bool {
         didSet { preferences.textBoxAutoResize = textBoxAutoResize; preferences.save() }
     }
+    var textBoxBorderWidth: CGFloat {
+        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; preferences.save() }
+    }
+    var textBoxBorderColor: UIColor {
+        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); preferences.save() }
+    }
+    var selectedTextBoxBorderWidth: CGFloat = 0
+    var selectedTextBoxBorderColor: UIColor = .black
     var activeShapeKind: OverlayShapeKind {
         didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
     }
@@ -76,6 +84,35 @@ class ImageEditorViewModel {
     }
     var pencilDoubleSqueezeAction: PencilGestureAction {
         didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+    }
+    var lineWidthInputStyle: LineWidthInputStyle {
+        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
+    }
+    var lineWidthStep: CGFloat {
+        didSet {
+            var p = preferences
+            p.lineWidthStep = lineWidthStep
+            p.normalizeLineWidthControlFields()
+            if p.lineWidthStep != lineWidthStep {
+                lineWidthStep = p.lineWidthStep
+                return
+            }
+            preferences.lineWidthStep = p.lineWidthStep
+            preferences.save()
+        }
+    }
+    var lineWidthMax: CGFloat {
+        didSet {
+            var p = preferences
+            p.lineWidthMax = lineWidthMax
+            p.normalizeLineWidthControlFields()
+            if p.lineWidthMax != lineWidthMax {
+                lineWidthMax = p.lineWidthMax
+                return
+            }
+            preferences.lineWidthMax = p.lineWidthMax
+            preferences.save()
+        }
     }
     var previousTool: EditorTool? = nil
 
@@ -119,6 +156,8 @@ class ImageEditorViewModel {
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
         self.textBoxAutoResize = prefs.textBoxAutoResize
+        self.textBoxBorderWidth = prefs.textBoxBorderWidth
+        self.textBoxBorderColor = prefs.textBoxBorderColor.uiColor
 
         self.activeShapeKind = prefs.activeShapeKind
         self.shapeLineWidth = prefs.shapeLineWidth
@@ -132,6 +171,10 @@ class ImageEditorViewModel {
         self.pencilDoubleTapAction     = prefs.pencilDoubleTapAction
         self.pencilSqueezeAction       = prefs.pencilSqueezeAction
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
+
+        self.lineWidthInputStyle = prefs.lineWidthInputStyle
+        self.lineWidthStep = prefs.lineWidthStep
+        self.lineWidthMax = prefs.lineWidthMax
     }
 
     func setTool(_ tool: EditorTool) {
@@ -172,6 +215,30 @@ class ImageEditorViewModel {
 
     func applyImageBorderToSelected() {
         canvasView?.applyImageBorderToSelected(borderWidth: imageBorderWidth, borderColor: imageBorderColor)
+    }
+
+    func applyTextBorderToSelected() {
+        canvasView?.applyTextBorderToSelected(borderWidth: selectedTextBoxBorderWidth, borderColor: selectedTextBoxBorderColor)
+    }
+
+    func commitSelectedTextBoxBorderWidth(_ width: CGFloat) {
+        selectedTextBoxBorderWidth = width
+        applyTextBorderToSelected()
+    }
+
+    func commitSelectedTextBoxBorderColor(_ color: UIColor) {
+        selectedTextBoxBorderColor = color
+        applyTextBorderToSelected()
+    }
+
+    func commitImageBorderWidth(_ width: CGFloat) {
+        imageBorderWidth = width
+        applyImageBorderToSelected()
+    }
+
+    func commitImageBorderColor(_ color: UIColor) {
+        imageBorderColor = color
+        applyImageBorderToSelected()
     }
 
     func addOverlayImage(_ image: UIImage) {
@@ -271,6 +338,11 @@ class ImageEditorViewModel {
                 return .imageShape(add: current, remove: remove)
             }
             return action
+        case .textBoxUpdate(let before, let after):
+            if let current = canvasView?.textBoxState(id: after.id) {
+                return .textBoxUpdate(before: before, after: current)
+            }
+            return action
         default:
             return action
         }
@@ -294,6 +366,8 @@ class ImageEditorViewModel {
             if let remove {
                 canvasView?.addTextBox(from: remove, beginEditing: false)
             }
+        case .textBoxUpdate(let before, _):
+            canvasView?.updateTextBox(from: before)
         case .imageBox(let add, let remove):
             if let add {
                 canvasView?.removeImageBox(id: add.id)
@@ -329,6 +403,8 @@ class ImageEditorViewModel {
             if let remove {
                 canvasView?.removeTextBox(id: remove.id)
             }
+        case .textBoxUpdate(_, let after):
+            canvasView?.updateTextBox(from: after)
         case .imageBox(let add, let remove):
             if let add {
                 canvasView?.addImageBox(from: add)
@@ -356,6 +432,7 @@ enum ImageUndoAction {
     case stroke(add: InkStroke?, remove: InkStroke?)
     case eraseSession(old: [InkStroke], new: [InkStroke])
     case textBox(add: OverlayTextBoxState?, remove: OverlayTextBoxState?)
+    case textBoxUpdate(before: OverlayTextBoxState, after: OverlayTextBoxState)
     case imageBox(add: OverlayImageState?, remove: OverlayImageState?)
     case imageBoxUpdate(before: OverlayImageState, after: OverlayImageState)
     case imageShape(add: OverlayShapeState?, remove: OverlayShapeState?)

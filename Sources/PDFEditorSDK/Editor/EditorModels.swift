@@ -15,6 +15,7 @@ enum UndoAction {
     case formFieldChange(annotation: PDFAnnotation, previousValue: String?, newValue: String?)
     case drawingSession(page: PDFPage, oldAnnotations: [PDFAnnotation], newAnnotations: [PDFAnnotation])
     case overlayTextBox(add: OverlayTextBoxState?, remove: OverlayTextBoxState?)
+    case overlayTextBoxUpdate(before: OverlayTextBoxState, after: OverlayTextBoxState)
     case moveAnnotation(annotation: PDFAnnotation, from: CGRect, to: CGRect)
     case overlayImage(add: OverlayImageState?, remove: OverlayImageState?)
     case overlayImageUpdate(before: OverlayImageState, after: OverlayImageState)
@@ -62,6 +63,8 @@ struct OverlayTextBoxState: Identifiable {
     var textAlignment: NSTextAlignment = .left
     var verticalAlignment: TextVerticalAlignment = .top
     var autoResizeEnabled: Bool = false
+    var borderWidth: CGFloat = 0
+    var borderColor: UIColor = .black
 }
 
 struct OverlayImageState: Identifiable {
@@ -112,6 +115,8 @@ struct OverlayTextBoxMeta: Codable {
     var textAlignment: Int?          // NSTextAlignment.rawValue; nil = legacy (defaults to .left)
     var verticalAlignment: String?   // TextVerticalAlignment.rawValue; nil = legacy (defaults to .top)
     var autoResize: Bool?            // nil = legacy (defaults to false)
+    var borderWidth: CGFloat?
+    var borderColor: RGBAColor?
 }
 
 struct OverlayImageMeta: Codable {

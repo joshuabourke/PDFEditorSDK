@@ -181,14 +181,18 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private var isFormFieldTextActive = false
     private var formWidgetTextSyncScheduled = false
     /// Saved `PDFView` inner scroll settings while a widget text control is first responder.
-    private var savedPDFScrollPanMinTouches: Int?
-    private var savedPDFScrollPanMaxTouches: Int?
     private var savedPDFScrollDelaysContentTouches: Bool?
-    /// Runtime logs showed selection-driven scrolling uses `go(to:rect:on:)` (not `go(to:selection)`).
-    /// While this deadline is active, pin the scroll offset around `super.go(to:rect:on:)` so body
-    /// text selection does not jump to the end of the document; Scribble focus uses the same API
-    /// after a delay, so the window is limited.
-    private var suppressPDFRectNavigationScrollUntil: Date?
+    /// True while a finger touch is in progress. Cleared in touchesEnded/Cancelled so that
+    /// handleTextSelectionChanged can tell whether a selection change is user-driven.
+    private var isDirectTouchInProgress = false
+    /// True while the user is actively selecting baked-in PDF text with a finger gesture.
+    private var isTextSelectionInProgress = false
+    /// KVO token that pins the scroll view's contentOffset during text selection.
+    /// PDFKit scrolls via its own internal gesture recognisers (not scrollView.panGestureRecognizer),
+    /// so isScrollEnabled = false is insufficient — KVO catches every write regardless of source.
+    private var textSelectionScrollObserver: NSKeyValueObservation?
+    /// The content offset captured when text selection began; held constant until the touch ends.
+    private var textSelectionLockedOffset: CGPoint?
 
     func setFormFieldEntryEnabled(_ enabled: Bool) {
         let selector = NSSelectorFromString("setAllowsFormFieldEntry:")
@@ -258,32 +262,17 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
 
     /// While a PDF widget text view is first responder:
-    /// - Require **two** fingers to pan the inner scroll view so one-finger drags stay with the field.
+    /// - Keep single-finger scroll active so the user can scroll normally while editing a form field.
     /// - Set `delaysContentTouches = false` so long-press / loupe / caret placement are not held behind
     ///   the scroll pan (avoids “System gesture gate timed out” and broken long-press seeking).
-    /// Disabling PDFKit `UILongPressGestureRecognizer`s elsewhere was reverted: it can leave the
-    /// system gesture gate waiting on recognizers we turned off.
     private func updatePDFScrollInteractionForEmbeddedWidgetTextEditing(_ widgetFocused: Bool) {
         guard let sv = scrollView else { return }
-        let pan = sv.panGestureRecognizer
         if widgetFocused {
-            if savedPDFScrollPanMinTouches == nil {
-                savedPDFScrollPanMinTouches = pan.minimumNumberOfTouches
-                savedPDFScrollPanMaxTouches = pan.maximumNumberOfTouches
-                pan.minimumNumberOfTouches = 2
-                pan.maximumNumberOfTouches = 2
-            }
             if savedPDFScrollDelaysContentTouches == nil {
                 savedPDFScrollDelaysContentTouches = sv.delaysContentTouches
                 sv.delaysContentTouches = false
             }
         } else {
-            if let min = savedPDFScrollPanMinTouches, let max = savedPDFScrollPanMaxTouches {
-                pan.minimumNumberOfTouches = min
-                pan.maximumNumberOfTouches = max
-                savedPDFScrollPanMinTouches = nil
-                savedPDFScrollPanMaxTouches = nil
-            }
             if let savedDelays = savedPDFScrollDelaysContentTouches {
                 sv.delaysContentTouches = savedDelays
                 savedPDFScrollDelaysContentTouches = nil
@@ -314,6 +303,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     var textBoxTextAlignment: NSTextAlignment = .left
     var textBoxVerticalAlignment: TextVerticalAlignment = .top
     var textBoxAutoResize: Bool = false
+    var textBoxBorderWidth: CGFloat = 0
+    var textBoxBorderColor: UIColor = .black
 
     /// When `true`, only Apple Pencil triggers annotations. Finger touches are
     /// passed through to PDFKit so the user can pan and zoom normally with one finger.
@@ -1520,10 +1511,42 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     func applyImageBorderToSelected(borderWidth: CGFloat, borderColor: UIColor) {
         guard let id = selectedImageBoxID, let box = imageBoxViews[id] else { return }
         let before = OverlayImageState(id: id, frame: box.frame, imageData: box.imageData, borderWidth: box.imageBorderWidth, borderColor: box.imageBorderColor)
+        if abs(before.borderWidth - borderWidth) < 0.001, before.borderColor.isEqual(borderColor) { return }
         box.updateBorder(width: borderWidth, color: borderColor)
         let after = OverlayImageState(id: id, frame: box.frame, imageData: box.imageData, borderWidth: borderWidth, borderColor: borderColor)
-        if before.borderWidth != after.borderWidth || before.borderColor != after.borderColor {
+        if before.borderWidth != after.borderWidth || !before.borderColor.isEqual(after.borderColor) {
             formViewModel?.didMakeChange(.overlayImageUpdate(before: before, after: after))
+        }
+    }
+
+    func applyTextBorderToSelected(borderWidth: CGFloat, borderColor: UIColor) {
+        guard let id = selectedTextBoxID,
+              let box = textBoxViews[id],
+              let before = overlayTextBoxState(id: id) else { return }
+        // Selection syncs these properties from the box; skip to avoid churn and feedback loops with .onChange.
+        if abs(before.borderWidth - borderWidth) < 0.001, before.borderColor.isEqual(borderColor) { return }
+        box.updateBorder(width: borderWidth, color: borderColor)
+        let after = overlayTextBoxState(id: id)!
+        if before.borderWidth != after.borderWidth || !before.borderColor.isEqual(after.borderColor) {
+            formViewModel?.didMakeChange(.overlayTextBoxUpdate(before: before, after: after))
+        }
+    }
+
+    func updateOverlayTextBox(from state: OverlayTextBoxState) {
+        guard let box = textBoxViews[state.id] else { return }
+        box.frame = state.frame
+        box.setText(state.text)
+        box.setBackground(state.backgroundColor)
+        box.setFontSize(state.fontSize, isBold: state.isBold)
+        box.setTextColor(state.textColor)
+        box.setTextAlignment(state.textAlignment)
+        box.setVerticalAlignment(state.verticalAlignment)
+        box.setAutoResize(state.autoResizeEnabled)
+        box.updateBorder(width: state.borderWidth, color: state.borderColor)
+        if selectedTextBoxID == state.id {
+            formViewModel?.selectedTextBoxAutoResize = state.autoResizeEnabled
+            formViewModel?.selectedTextBoxBorderWidth = state.borderWidth
+            formViewModel?.selectedTextBoxBorderColor = state.borderColor
         }
     }
 
@@ -1579,7 +1602,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment,
-            autoResizeEnabled: textBoxAutoResize
+            autoResizeEnabled: textBoxAutoResize,
+            borderWidth: textBoxBorderWidth,
+            borderColor: textBoxBorderColor
         )
         addOverlayTextBox(from: state, beginEditing: true)
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
@@ -1595,6 +1620,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
         box.setAutoResize(state.autoResizeEnabled)
+        box.updateBorder(width: state.borderWidth, color: state.borderColor)
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
@@ -1634,7 +1660,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textColor: box.currentTextColor,
             textAlignment: box.currentTextAlignment,
             verticalAlignment: box.currentVerticalAlignment,
-            autoResizeEnabled: box.currentAutoResize
+            autoResizeEnabled: box.currentAutoResize,
+            borderWidth: box.currentBorderWidth,
+            borderColor: box.currentBorderColor
         )
     }
 
@@ -1766,6 +1794,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         formViewModel?.selectedOverlayKind = .textBox
         if let box = textBoxViews[id] {
             formViewModel?.selectedTextBoxAutoResize = box.currentAutoResize
+            formViewModel?.selectedTextBoxBorderWidth = box.currentBorderWidth
+            formViewModel?.selectedTextBoxBorderColor = box.currentBorderColor
             textBoxOverlayView.bringSubviewToFront(box)
         }
         updateOverlaySelectionUI()
@@ -1921,7 +1951,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 textColor: RGBAColor(box.currentTextColor),
                 textAlignment: box.currentTextAlignment.rawValue,
                 verticalAlignment: box.currentVerticalAlignment.rawValue,
-                autoResize: box.currentAutoResize ? true : nil
+                autoResize: box.currentAutoResize ? true : nil,
+                borderWidth: box.currentBorderWidth > 0 ? box.currentBorderWidth : nil,
+                borderColor: box.currentBorderWidth > 0 ? RGBAColor(box.currentBorderColor) : nil
             )
             textMetas.append(meta)
         }
@@ -1969,7 +2001,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 textColor: (text.textColor?.uiColor) ?? .label,
                 textAlignment: NSTextAlignment(rawValue: text.textAlignment ?? 0) ?? .left,
                 verticalAlignment: TextVerticalAlignment(rawValue: text.verticalAlignment ?? "") ?? .top,
-                autoResizeEnabled: text.autoResize ?? false
+                autoResizeEnabled: text.autoResize ?? false,
+                borderWidth: text.borderWidth ?? 0,
+                borderColor: text.borderColor?.uiColor ?? .black
             )
             addOverlayTextBox(from: state, beginEditing: false)
         }
@@ -2347,8 +2381,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         }
         let hasSelection = currentSelection != nil && !(currentSelection?.string?.isEmpty ?? true)
         formViewModel?.hasTextSelection = hasSelection
-        if isFormMode && !isFormFieldTextActive {
-            suppressPDFRectNavigationScrollUntil = Date().addingTimeInterval(0.45)
+        if !isFormFieldTextActive && isDirectTouchInProgress && hasSelection && !isTextSelectionInProgress {
+            beginTextSelectionScrollLock()
+        } else if !hasSelection {
+            endTextSelectionScrollLock()
         }
     }
     
@@ -2523,6 +2559,25 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         pdfHostedTextInputWithFocus(in: view) != nil
     }
 
+    private func beginTextSelectionScrollLock() {
+        guard !isTextSelectionInProgress, let sv = scrollView else { return }
+        isTextSelectionInProgress = true
+        textSelectionLockedOffset = sv.contentOffset
+        textSelectionScrollObserver = sv.observe(\.contentOffset, options: [.new]) { [weak self] sv, _ in
+            guard let self, let locked = self.textSelectionLockedOffset else { return }
+            if sv.contentOffset != locked {
+                sv.setContentOffset(locked, animated: false)
+            }
+        }
+    }
+
+    private func endTextSelectionScrollLock() {
+        guard isTextSelectionInProgress else { return }
+        isTextSelectionInProgress = false
+        textSelectionScrollObserver = nil
+        textSelectionLockedOffset = nil
+    }
+
     /// The focused PDF widget text control under `view`, if any (e.g. `PDFTextWidgetTextView`).
     private func pdfHostedTextInputWithFocus(in view: UIView) -> UIView? {
         if (view is UITextField || view is UITextView), view.isFirstResponder { return view }
@@ -2661,6 +2716,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             }
             return
         }
+        // Mark a finger touch as in-progress so go(to:rect:on:) can suppress
+        // PDFKit's selection-anchor scroll for the full duration of the gesture.
+        if touches.contains(where: { $0.type == .direct }) {
+            isDirectTouchInProgress = true
+        }
         super.touchesBegan(touches, with: event)
     }
 
@@ -2696,11 +2756,15 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             fingerDismissOverlayTouchStart = nil
             return
         }
+        isDirectTouchInProgress = false
+        endTextSelectionScrollLock()
         super.touchesEnded(touches, with: event)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         if suppressGoTo { return }
+        isDirectTouchInProgress = false
+        endTextSelectionScrollLock()
         if shouldInterceptAllTouches {
             // Pan gesture began — it owns this touch, clear the tap tracker.
             textModeTouchStart = nil
@@ -2722,51 +2786,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     override func go(to rect: CGRect, on page: PDFPage) {
         if shouldInterceptAllTouches || suppressGoTo { return }
-        let pinRectNavigation = isFormMode
-            && !isFormFieldTextActive
-            && ((suppressPDFRectNavigationScrollUntil.map { Date() < $0 }) ?? false)
-        if pinRectNavigation {
-            pinScrollOffsetWhileInvokingSelectionScroll { super.go(to: rect, on: page) }
-        } else {
-            super.go(to: rect, on: page)
-        }
-    }
-
-    /// PDFKit often moves the inner scroll view when selections change; pin the offset
-    /// across immediate and deferred layout so continuous multi-page PDFs do not jump.
-    private func pinScrollOffsetWhileInvokingSelectionScroll(_ invoke: () -> Void) {
-        guard let sv = scrollView else {
-            invoke()
-            return
-        }
-        let pinned = sv.contentOffset
-        invoke()
-        func restorePinnedOffset() {
-            guard let sv = scrollView else { return }
-            if sv.contentOffset != pinned {
-                sv.setContentOffset(pinned, animated: false)
-            }
-        }
-        restorePinnedOffset()
-        DispatchQueue.main.async(execute: restorePinnedOffset)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: restorePinnedOffset)
-    }
-
-    override func go(to selection: PDFSelection) {
-        if isFormFieldTextActive {
-            super.go(to: selection)
-            return
-        }
-        pinScrollOffsetWhileInvokingSelectionScroll { super.go(to: selection) }
-    }
-
-    /// Selection updates often call this instead of (or in addition to) `go(to: PDFSelection)`.
-    override func scrollSelectionToVisible(_ sender: Any?) {
-        if isFormFieldTextActive {
-            super.scrollSelectionToVisible(sender)
-            return
-        }
-        pinScrollOffsetWhileInvokingSelectionScroll { super.scrollSelectionToVisible(sender) }
+        super.go(to: rect, on: page)
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
