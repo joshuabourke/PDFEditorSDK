@@ -182,6 +182,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private var formWidgetTextSyncScheduled = false
     /// Saved `PDFView` inner scroll settings while a widget text control is first responder.
     private var savedPDFScrollDelaysContentTouches: Bool?
+    /// Most recent keyboard end-frame in window coordinates; cleared when keyboard hides.
+    private var lastKnownKeyboardFrame: CGRect = .zero
     /// True while a finger touch is in progress. Cleared in touchesEnded/Cancelled so that
     /// handleTextSelectionChanged can tell whether a selection change is user-driven.
     private var isDirectTouchInProgress = false
@@ -445,6 +447,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     
     // Form field tracking
     private var formFieldStates: [String: String?] = [:]
+    private var activeFormFieldAnnotation: PDFAnnotation?
+    private var activeFormFieldName: String?
+    private var activeFormFieldInitialValue: String?
+    private var isApplyingFormUndoRedo = false
+    private var fullFormWidgetRefreshScheduled = false
 
     // Keyboard offset preservation for text box editing
     private var savedTextBoxContentOffset: CGPoint?
@@ -878,6 +885,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         guard annotation.type == PDFAnnotationSubtype.widget.rawValue else { return }
         let wt = annotation.widgetFieldType
         if wt == .text || wt == .choice {
+            if let fieldName = annotation.fieldName, formFieldStates[fieldName] == nil {
+                formFieldStates[fieldName] = annotation.widgetStringValue
+            }
             // PDFKit often focuses the widget after this notification; disable double-tap
             // zoom immediately so it does not beat UITextField word-selection gestures.
             setDoubleTapZoomEnabled(false)
@@ -1069,11 +1079,16 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     private func handleTextModeTap(at point: CGPoint) {
         if let textBox = textBoxViewAtPoint(point) {
+            // Tap landed on an existing text box — select and begin editing.
             selectTextBox(id: textBox.id)
             textBox.beginEditing()
-        } else {
+        } else if textBoxViews.values.contains(where: { $0.isTextInputFirstResponder }) {
+            // A text box is currently being edited — outside tap dismisses it.
             endOverlayTextEditing()
             deselectOverlaySelection()
+        } else {
+            // Nothing active, empty canvas — create a new auto-sizing text box here.
+            createTapTextBox(at: point)
         }
     }
 
@@ -1397,9 +1412,15 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                     // Sufficient drag on empty space — create a new text box.
                     createOverlayTextBox(with: rectInView)
                 } else {
-                    // Short tap on empty space — dismiss the keyboard and deselect.
-                    endOverlayTextEditing()
-                    deselectOverlaySelection()
+                    // Short movement on empty space — same logic as a pure tap:
+                    // dismiss if a box is editing, otherwise create a new one.
+                    let anyBoxEditing = textBoxViews.values.contains { $0.isTextInputFirstResponder }
+                    if anyBoxEditing {
+                        endOverlayTextEditing()
+                        deselectOverlaySelection()
+                    } else {
+                        createTapTextBox(at: start)
+                    }
                 }
             }
         default:
@@ -1505,7 +1526,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     func updateOverlayShape(from state: OverlayShapeState) {
         guard let box = shapeBoxViews[state.id] else { return }
         box.frame = state.frame
-        box.applyStyle(strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.applyStyle(kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
     }
 
     func applyImageBorderToSelected(borderWidth: CGFloat, borderColor: UIColor) {
@@ -1550,12 +1571,12 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         }
     }
 
-    func applyShapeStyleToSelected(strokeColor: UIColor, lineWidth: CGFloat) {
+    func applyShapeStyleToSelected(kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
         guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
         let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
-        box.applyStyle(strokeColor: strokeColor, lineWidth: lineWidth)
-        let after = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-        if before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
+        box.applyStyle(kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        if before.kind != after.kind || before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
             formViewModel?.didMakeChange(.overlayShapeUpdate(before: before, after: after))
         }
     }
@@ -1567,6 +1588,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         deselectInkAnnotation()
         formViewModel?.selectedOverlayKind = .shape
         if let box = shapeBoxViews[id] {
+            formViewModel?.activeShapeKind = box.shapeKind
             formViewModel?.shapeStrokeColor = box.strokeColor
             formViewModel?.shapeLineWidth = box.lineWidth
         }
@@ -1591,7 +1613,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             width: max(rectInDoc.width, 80),
             height: max(rectInDoc.height, 40)
         )
-        
+
         let state = OverlayTextBoxState(
             id: UUID(),
             frame: normalizedRect,
@@ -1609,8 +1631,57 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         addOverlayTextBox(from: state, beginEditing: true)
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
     }
+
+    /// Creates a minimal text box at a tap point that auto-expands horizontally as
+    /// the user types, growing up to the right edge of the underlying PDF page, then
+    /// wraps and expands vertically for new lines.
+    private func createTapTextBox(at viewPoint: CGPoint) {
+        guard let docView = documentView else { return }
+        let pointInDoc = docView.convert(viewPoint, from: self)
+
+        // Compute the right edge of the PDF page that was tapped, in document-view
+        // coordinates. This becomes the horizontal cap for the auto-resize.
+        let maxWidth: CGFloat
+        if let page = self.page(for: viewPoint, nearest: true) {
+            let pageBounds = page.bounds(for: .mediaBox)
+            // Use the vertical midpoint of the page so the X conversion is stable.
+            let pageRightInView = convert(
+                CGPoint(x: pageBounds.maxX, y: pageBounds.midY), from: page
+            )
+            let pageRightInDoc = docView.convert(pageRightInView, from: self)
+            maxWidth = max(80, pageRightInDoc.x - pointInDoc.x)
+        } else {
+            maxWidth = max(80, docView.bounds.width - pointInDoc.x)
+        }
+
+        // Start with a single-line-height frame. The box expands as the user types.
+        let lineHeight = textBoxFontSize + 12   // 6 pt top + 6 pt bottom padding
+        let initialFrame = CGRect(
+            x: pointInDoc.x,
+            y: pointInDoc.y,
+            width: 40,
+            height: max(30, lineHeight)
+        )
+
+        let state = OverlayTextBoxState(
+            id: UUID(),
+            frame: initialFrame,
+            text: "",
+            backgroundColor: textBoxBackgroundColor,
+            fontSize: textBoxFontSize,
+            isBold: textBoxIsBold,
+            textColor: textBoxTextColor,
+            textAlignment: textBoxTextAlignment,
+            verticalAlignment: textBoxVerticalAlignment,
+            autoResizeEnabled: textBoxAutoResize,
+            borderWidth: textBoxBorderWidth,
+            borderColor: textBoxBorderColor
+        )
+        addOverlayTextBox(from: state, beginEditing: true, tapCreateMaxWidth: maxWidth)
+        formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
+    }
     
-    func addOverlayTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false) {
+    func addOverlayTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false, tapCreateMaxWidth: CGFloat? = nil) {
         let box = TextBoxView(id: state.id)
         box.frame = state.frame
         box.setText(state.text)
@@ -1621,6 +1692,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.setVerticalAlignment(state.verticalAlignment)
         box.setAutoResize(state.autoResizeEnabled)
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
+        if let maxWidth = tapCreateMaxWidth {
+            box.setTapCreateAutoResize(enabled: true, maxWidth: maxWidth)
+        }
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
@@ -2549,8 +2623,10 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         )
         let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextField.textDidBeginEditingNotification, object: nil)
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextField.textDidChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextField.textDidEndEditingNotification, object: nil)
         nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextView.textDidBeginEditingNotification, object: nil)
+        nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextView.textDidChangeNotification, object: nil)
         nc.addObserver(self, selector: #selector(formHostedTextInputEditingChanged), name: UITextView.textDidEndEditingNotification, object: nil)
     }
 
@@ -2585,6 +2661,241 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             if let found = pdfHostedTextInputWithFocus(in: sub) { return found }
         }
         return nil
+    }
+
+    /// PDFKit can leave the most recent widget editor visible after it resigns
+    /// first responder. Scan every hosted text input so refresh can sync stale
+    /// editors, not just the currently focused one.
+    private func pdfHostedTextInputs(in view: UIView) -> [UIView] {
+        var inputs: [UIView] = []
+        if (view is UITextField || view is UITextView),
+           !view.isDescendant(of: textBoxOverlayView) {
+            inputs.append(view)
+        }
+        for subview in view.subviews {
+            inputs.append(contentsOf: pdfHostedTextInputs(in: subview))
+        }
+        return inputs
+    }
+
+    /// Copies the focused native PDF widget editor's text into `widgetStringValue`
+    /// so undo/export reads the current string even when PDFKit has not yet
+    /// synced after editing.
+    func commitActiveFormWidgetTextToAnnotations() {
+        guard let focused = pdfHostedTextInputWithFocus(in: self) else { return }
+        commitFormWidgetText(from: focused)
+    }
+
+    /// Forces form-field undo tracking to capture any widget changes now,
+    /// instead of waiting for keyboard notifications.
+    func flushPendingFormFieldUndoTracking() {
+        if let focused = pdfHostedTextInputWithFocus(in: self) {
+            commitFormWidgetText(from: focused)
+        }
+        recordActiveFormFieldChange(resetSession: true)
+        recordFormFieldChanges()
+    }
+
+    private func beginFormFieldEditSession(for textInput: UIView) {
+        guard !isApplyingFormUndoRedo else { return }
+        guard let annotation = formWidgetAnnotationOwningFirstResponderIfKnown(textInput),
+              let fieldName = annotation.fieldName else { return }
+        let wt = annotation.widgetFieldType
+        guard wt == .text || wt == .choice else { return }
+
+        if activeFormFieldAnnotation !== annotation || activeFormFieldName != fieldName {
+            recordActiveFormFieldChange(resetSession: false)
+        }
+
+        let currentValue = annotation.widgetStringValue
+        if formFieldStates[fieldName] == nil {
+            formFieldStates[fieldName] = currentValue
+        }
+
+        activeFormFieldAnnotation = annotation
+        activeFormFieldName = fieldName
+        activeFormFieldInitialValue = formFieldStates[fieldName] ?? currentValue
+    }
+
+    @discardableResult
+    private func commitFormWidgetText(from textInput: UIView) -> PDFAnnotation? {
+        guard textInput is UITextField || textInput is UITextView else { return nil }
+        guard !textInput.isDescendant(of: textBoxOverlayView) else { return nil }
+        guard let annotation = formWidgetAnnotationOwningFirstResponderIfKnown(textInput) else { return nil }
+        let wt = annotation.widgetFieldType
+        guard wt == .text || wt == .choice else { return nil }
+
+        let committed: String
+        if let textField = textInput as? UITextField {
+            committed = textField.text ?? ""
+        } else if let textView = textInput as? UITextView {
+            committed = textView.text ?? ""
+        } else {
+            return nil
+        }
+
+        annotation.widgetStringValue = committed
+        annotation.setValue(committed, forAnnotationKey: .widgetValue)
+        return annotation
+    }
+
+    private func syncHostedFormWidgetTextInputs() {
+        for textInput in pdfHostedTextInputs(in: self) {
+            guard let annotation = formWidgetAnnotationOwningFirstResponderIfKnown(textInput) else { continue }
+            let wt = annotation.widgetFieldType
+            guard wt == .text || wt == .choice else { continue }
+
+            let textValue = annotation.widgetStringValue ?? ""
+            if let textField = textInput as? UITextField, textField.text != textValue {
+                textField.text = textValue
+            } else if let textView = textInput as? UITextView, textView.text != textValue {
+                textView.text = textValue
+            }
+            textInput.setNeedsDisplay()
+            textInput.setNeedsLayout()
+        }
+    }
+
+    private func recordActiveFormFieldChange(resetSession: Bool) {
+        guard !isApplyingFormUndoRedo else { return }
+        guard let annotation = activeFormFieldAnnotation,
+              let fieldName = activeFormFieldName else { return }
+        let currentValue = annotation.widgetStringValue
+        let previousValue = activeFormFieldInitialValue
+        guard previousValue != currentValue else {
+            formFieldStates[fieldName] = currentValue
+            if resetSession {
+                activeFormFieldInitialValue = currentValue
+            } else {
+                clearActiveFormFieldEditSession()
+            }
+            return
+        }
+
+        formViewModel?.recordFormFieldChange(
+            annotation: annotation,
+            previousValue: previousValue,
+            newValue: currentValue
+        )
+        formFieldStates[fieldName] = currentValue
+
+        if resetSession {
+            activeFormFieldInitialValue = currentValue
+        } else {
+            clearActiveFormFieldEditSession()
+        }
+    }
+
+    private func clearActiveFormFieldEditSession() {
+        activeFormFieldAnnotation = nil
+        activeFormFieldName = nil
+        activeFormFieldInitialValue = nil
+    }
+
+    func beginApplyingFormUndoRedo() {
+        isApplyingFormUndoRedo = true
+    }
+
+    func endApplyingFormUndoRedo() {
+        isApplyingFormUndoRedo = false
+    }
+
+    func syncFormFieldBaseline(for annotation: PDFAnnotation) {
+        guard let fieldName = annotation.fieldName else { return }
+        formFieldStates[fieldName] = annotation.widgetStringValue
+        if activeFormFieldName == fieldName {
+            activeFormFieldInitialValue = annotation.widgetStringValue
+        }
+    }
+
+    func refreshFormWidgetAppearance(for annotation: PDFAnnotation) {
+        let matchingAnnotations = formWidgetAnnotationsMatching(annotation)
+        let value = annotation.widgetStringValue
+        if let focused = pdfHostedTextInputWithFocus(in: self),
+           let activeAnnotation = formWidgetAnnotationOwningFirstResponderIfKnown(focused),
+           matchingAnnotations.contains(where: { $0 === activeAnnotation }) {
+            let textValue = value ?? ""
+            if let tf = focused as? UITextField, tf.text != textValue {
+                tf.text = textValue
+            } else if let tv = focused as? UITextView, tv.text != textValue {
+                tv.text = textValue
+            }
+        }
+        for ann in matchingAnnotations {
+            guard let page = ann.page else { continue }
+            ann.widgetStringValue = value
+            ann.setValue(value as Any, forAnnotationKey: .widgetValue)
+            let viewRect = convert(ann.bounds, from: page).insetBy(dx: -8, dy: -8)
+            page.removeAnnotation(ann)
+            page.addAnnotation(ann)
+            setNeedsDisplay(viewRect)
+        }
+        setNeedsDisplay()
+        documentView?.setNeedsDisplay()
+        documentView?.setNeedsLayout()
+        scrollView?.setNeedsDisplay()
+        scrollView?.setNeedsLayout()
+        syncHostedFormWidgetTextInputs()
+        updateFormFieldHighlights()
+        scheduleFormWidgetTextSync()
+    }
+
+    func refreshAllFormWidgetAppearances() {
+        guard let document else { return }
+
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            let annotations = page.annotations
+            for annotation in annotations {
+                guard annotation.type == PDFAnnotationSubtype.widget.rawValue else { continue }
+                let fieldType = annotation.widgetFieldType
+                guard fieldType == .text || fieldType == .choice else { continue }
+
+                let value = annotation.widgetStringValue
+                annotation.widgetStringValue = value
+                annotation.setValue(value as Any, forAnnotationKey: .widgetValue)
+
+                let viewRect = convert(annotation.bounds, from: page).insetBy(dx: -8, dy: -8)
+                page.removeAnnotation(annotation)
+                page.addAnnotation(annotation)
+                setNeedsDisplay(viewRect)
+            }
+        }
+
+        setNeedsDisplay()
+        documentView?.setNeedsDisplay()
+        documentView?.setNeedsLayout()
+        scrollView?.setNeedsDisplay()
+        scrollView?.setNeedsLayout()
+        layoutDocumentView()
+        syncHostedFormWidgetTextInputs()
+        updateFormFieldHighlights()
+        scheduleFormWidgetTextSync()
+    }
+
+    func scheduleFullFormWidgetAppearanceRefresh() {
+        guard !fullFormWidgetRefreshScheduled else { return }
+        fullFormWidgetRefreshScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.fullFormWidgetRefreshScheduled = false
+            self.refreshAllFormWidgetAppearances()
+        }
+    }
+
+    private func formWidgetAnnotationsMatching(_ annotation: PDFAnnotation) -> [PDFAnnotation] {
+        guard let document, let fieldName = annotation.fieldName else { return [annotation] }
+        var matches: [PDFAnnotation] = []
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            for candidate in page.annotations {
+                guard candidate.type == PDFAnnotationSubtype.widget.rawValue else { continue }
+                guard candidate.fieldName == fieldName else { continue }
+                guard candidate.widgetFieldType == .text || candidate.widgetFieldType == .choice else { continue }
+                matches.append(candidate)
+            }
+        }
+        return matches.isEmpty ? [annotation] : matches
     }
 
     private func syncFormWidgetTextEditingState() {
@@ -2624,11 +2935,39 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         guard let view = notification.object as? UIView, view.isDescendant(of: self) else { return }
         // Overlay text boxes live under `textBoxOverlayView`; ignore them whenever they could receive events.
         if view.isDescendant(of: textBoxOverlayView) { return }
+
+        if notification.name == UITextField.textDidBeginEditingNotification ||
+            notification.name == UITextView.textDidBeginEditingNotification {
+            beginFormFieldEditSession(for: view)
+            // Keyboard may already be visible (user tapped a second field); scroll into view.
+            if !lastKnownKeyboardFrame.isEmpty {
+                scrollFocusedFormFieldAboveKeyboard(animationDuration: 0.25)
+            }
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self, let view else { return }
+                self.beginFormFieldEditSession(for: view)
+            }
+        } else if notification.name == UITextField.textDidChangeNotification ||
+                    notification.name == UITextView.textDidChangeNotification {
+            if activeFormFieldAnnotation == nil {
+                beginFormFieldEditSession(for: view)
+            }
+            commitFormWidgetText(from: view)
+        } else if notification.name == UITextField.textDidEndEditingNotification ||
+                    notification.name == UITextView.textDidEndEditingNotification {
+            commitFormWidgetText(from: view)
+            recordActiveFormFieldChange(resetSession: false)
+        }
+
         scheduleFormWidgetTextSync()
     }
     
     @objc private func keyboardWillShow(_ notification: Notification) {
         captureFormFieldStates()
+
+        if let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+            lastKnownKeyboardFrame = endFrame
+        }
 
         // First responder on a PDF widget may lag the keyboard; resync after layout.
         if isFormMode {
@@ -2636,6 +2975,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             DispatchQueue.main.async { [weak self] in
                 self?.syncFormWidgetTextEditingState()
             }
+            let duration = notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+            scrollFocusedFormFieldAboveKeyboard(animationDuration: duration)
         }
 
         // Preserve scroll position when editing an overlay text box
@@ -2646,7 +2987,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     @objc private func keyboardDidHide(_ notification: Notification) {
         recordFormFieldChanges()
-        formFieldStates.removeAll()
+        lastKnownKeyboardFrame = .zero
         savedTextBoxContentOffset = nil
 
         // Keyboard can hide while a widget stays first responder (e.g. iPad); re-sync from the view tree.
@@ -2669,6 +3010,44 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         }
     }
     
+    private func scrollFocusedFormFieldAboveKeyboard(animationDuration: Double = 0.25) {
+        guard isFormMode, selectedTextBoxID == nil else { return }
+        guard let sv = scrollView, let window else { return }
+        guard !lastKnownKeyboardFrame.isEmpty else { return }
+
+        // Keyboard frames reported while the device is in landscape can be in portrait
+        // coordinates on older iOS; only act when the keyboard visibly covers screen space.
+        let keyboardFrameInWindow = window.convert(lastKnownKeyboardFrame, from: nil)
+        let windowHeight = window.bounds.height
+        guard keyboardFrameInWindow.minY < windowHeight else { return }
+
+        // Locate the focused form-widget text input. PDFKit assigns first responder
+        // slightly after the tap, so defer one run-loop pass if it's not ready yet.
+        guard let focused = pdfHostedTextInputWithFocus(in: self) else {
+            DispatchQueue.main.async { [weak self] in
+                self?.scrollFocusedFormFieldAboveKeyboard(animationDuration: animationDuration)
+            }
+            return
+        }
+
+        let fieldFrameInWindow = focused.convert(focused.bounds, to: window)
+        let keyboardTop = keyboardFrameInWindow.minY
+        let padding: CGFloat = 24
+
+        // Field is already clear of the keyboard — nothing to do.
+        guard fieldFrameInWindow.maxY + padding > keyboardTop else { return }
+
+        // Shift scroll so the field's bottom sits `padding` above the keyboard.
+        let overlap = fieldFrameInWindow.maxY + padding - keyboardTop
+        let maxOffset = max(0, sv.contentSize.height - sv.bounds.height)
+        let newOffsetY = min(sv.contentOffset.y + overlap, maxOffset)
+        guard newOffsetY != sv.contentOffset.y else { return }
+
+        UIView.animate(withDuration: animationDuration) {
+            sv.contentOffset = CGPoint(x: sv.contentOffset.x, y: newOffsetY)
+        }
+    }
+
     private func captureFormFieldStates() {
         guard let document = self.document else { return }
         for pageIndex in 0..<document.pageCount {
@@ -2683,20 +3062,25 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
     
     private func recordFormFieldChanges() {
+        guard !isApplyingFormUndoRedo else { return }
         guard let document = self.document else { return }
         for pageIndex in 0..<document.pageCount {
             guard let page = document.page(at: pageIndex) else { continue }
             for annotation in page.annotations {
-                if let fieldName = annotation.fieldName,
-                   let previousValue = formFieldStates[fieldName],
-                   let currentValue = annotation.widgetStringValue,
-                   previousValue != currentValue {
-                    formViewModel?.recordFormFieldChange(
-                        annotation: annotation,
-                        previousValue: previousValue,
-                        newValue: currentValue
-                    )
+                guard let fieldName = annotation.fieldName,
+                      annotation.widgetFieldType == .text || annotation.widgetFieldType == .choice else { continue }
+                let currentValue = annotation.widgetStringValue
+                guard let previousValue = formFieldStates[fieldName] else {
+                    formFieldStates[fieldName] = currentValue
+                    continue
                 }
+                guard previousValue != currentValue else { continue }
+                formViewModel?.recordFormFieldChange(
+                    annotation: annotation,
+                    previousValue: previousValue,
+                    newValue: currentValue
+                )
+                formFieldStates[fieldName] = currentValue
             }
         }
     }

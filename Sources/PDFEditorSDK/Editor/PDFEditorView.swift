@@ -61,15 +61,33 @@ private struct PDFEditorHomeContainer: View {
 struct PDFFormEditorView: View {
     @Bindable var viewModel: PDFFormViewModel
     var showsDismissButton = false
+    var showsHighlightButton = true
+    var showsLockButton = true
+    var showsPencilButton = true
     var onSaveNavigate: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
-    private let toolbarChipSize = CGSize(width: 56, height: 50)
+    private var toolbarChipSize: CGSize {
+        viewModel.toolbarCompact ? CGSize(width: 44, height: 40) : CGSize(width: 56, height: 50)
+    }
+    private var toolbarButtonPadding: CGFloat {
+        viewModel.toolbarCompact ? 8 : 6
+    }
+    private var toolbarDividerHeight: CGFloat {
+        viewModel.toolbarCompact ? 30 : 36
+    }
+    private var toolbarDividerTopPadding: CGFloat {
+        viewModel.toolbarCompact ? 12 : 14
+    }
+    private let selectEditToolbarChipSize = CGSize(width: 36, height: 36)
     @State private var isShowingSaveAlert = false
     @State private var isShowingExportAlert = false
     @State private var isShowingImagePicker = false
     @State private var imagePickerSource: ImagePickerSource = .photoLibrary
-    @State private var isShowingShareSheet = false
-    @State private var exportURL: URL?
+    /// Wraps the exported URL in an Identifiable so `.sheet(item:)` always
+    /// creates a fresh sheet — even when the user shares multiple times.
+    /// Using a plain Bool + URL pair causes the ActivityViewController to reuse
+    /// its cached items whenever `isPresented` stays `true` across dismissals.
+    @State private var shareItem: ShareableURL?
     @State private var isShowingInsertPageSheet = false
     @State private var insertPageIndex = 0
     @State private var isShowingRemovePageAlert = false
@@ -94,10 +112,8 @@ struct PDFFormEditorView: View {
                     viewModel.handleImagePickedFromSheet(image)
                 }
             }
-            .sheet(isPresented: $isShowingShareSheet) {
-                if let exportURL {
-                    ActivityView(activityItems: [exportURL])
-                }
+            .sheet(item: $shareItem) { item in
+                ActivityView(activityItems: [item.url])
             }
             .sheet(isPresented: $isShowingInsertPageSheet) {
                 NavigationStack {
@@ -132,6 +148,7 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxTextAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
             .onChange(of: viewModel.textBoxVerticalAlignment) { _, _ in viewModel.applyTextStyleToSelectedTextBox() }
+            .onChange(of: viewModel.activeShapeKind) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
             .alert("Unsaved Changes", isPresented: $changesNotSaved) {
@@ -220,9 +237,8 @@ struct PDFFormEditorView: View {
                 }
 
                 Button {
-                    exportURL = viewModel.exportFlattenedPDF()
-                    if exportURL != nil {
-                        isShowingShareSheet = true
+                    if let url = viewModel.exportFlattenedPDF() {
+                        shareItem = ShareableURL(url: url)
                     } else {
                         isShowingExportAlert = true
                     }
@@ -280,8 +296,8 @@ struct PDFFormEditorView: View {
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     VStack(spacing: 6) {
                         Text("Form")
@@ -293,57 +309,55 @@ struct PDFFormEditorView: View {
                             Button {
                                 viewModel.setTool(.form)
                             } label: {
-                                VStack(spacing: 4) {
+                                toolbarButtonContent("Form") {
                                     Image(systemName: "text.document")
                                         .symbolVariant(viewModel.activeTool == .form ? .fill : .none)
                                         .fontWeight(.semibold)
-                                    Text("Form")
-                                        .fontWeight(.semibold)
                                 }
                                 .foregroundStyle(Color.accentColor)
-                                .padding(6)
+                                .padding(toolbarButtonPadding)
                                 .background(viewModel.activeTool == .form ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
                             
-                            Button {
-                                viewModel.highlightSelectedText()
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "highlighter")
-                                        .fontWeight(.semibold)
-                                    Text("Highlight")
-                                        .fontWeight(.semibold)
+                            if showsHighlightButton {
+                                Button {
+                                    viewModel.highlightSelectedText()
+                                } label: {
+                                    toolbarButtonContent("Highlight") {
+                                        Image(systemName: "highlighter")
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundStyle(viewModel.hasTextSelection ? Color.accentColor : .secondary.opacity(0.3))
+                                    .padding(toolbarButtonPadding)
+                                    .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                                 }
-                                .foregroundStyle(viewModel.hasTextSelection ? Color.accentColor : .secondary.opacity(0.3))
-                                .padding(6)
-                                .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                                .buttonStyle(.plain)
+                                .disabled(!viewModel.hasTextSelection)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(!viewModel.hasTextSelection)
                             
-                            Button {
-                                viewModel.toggleScrollLock()
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "lock")
-                                        .symbolVariant(viewModel.pageScrollLocked ? .fill : .none)
-                                        .fontWeight(.semibold)
-                                    Text("Lock")
-                                        .fontWeight(.semibold)
+                            if showsLockButton {
+                                Button {
+                                    viewModel.toggleScrollLock()
+                                } label: {
+                                    toolbarButtonContent("Lock") {
+                                        Image(systemName: "lock")
+                                            .symbolVariant(viewModel.pageScrollLocked ? .fill : .none)
+                                            .fontWeight(.semibold)
+                                    }
+                                    .foregroundStyle(Color.accentColor)
+                                    .padding(toolbarButtonPadding)
+                                    .background(viewModel.pageScrollLocked ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                                 }
-                                .foregroundStyle(Color.accentColor)
-                                .padding(6)
-                                .background(viewModel.pageScrollLocked ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                     
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
                     
                     // MARK: Draw
                     VStack(alignment: .leading, spacing: 6) {
@@ -352,14 +366,13 @@ struct PDFFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Draw") {
                             Image(systemName: "pencil.and.scribble")
                                 .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Draw").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(
                             viewModel.isDrawingMode && !viewModel.isEraserMode
                                 ? Color.accentColor.opacity(0.3)
@@ -394,8 +407,8 @@ struct PDFFormEditorView: View {
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     // MARK: Erase
                     VStack(alignment: .leading, spacing: 6) {
@@ -404,14 +417,13 @@ struct PDFFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Erase") {
                             Image(systemName: "eraser")
                                 .symbolVariant(viewModel.isEraserMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Erase").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(
                             viewModel.isEraserMode
                                 ? Color.accentColor.opacity(0.3)
@@ -437,8 +449,8 @@ struct PDFFormEditorView: View {
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     // MARK: Text
                     VStack(alignment: .leading, spacing: 6) {
@@ -447,14 +459,13 @@ struct PDFFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Text") {
                             Image(systemName: "character.cursor.ibeam")
                                 .symbolVariant(viewModel.isTextMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Text").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         .contentShape(Rectangle())
                         .gesture(
@@ -495,15 +506,15 @@ struct PDFFormEditorView: View {
                     
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     shapeToolSection
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Image")
@@ -511,14 +522,12 @@ struct PDFFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Image") {
                             Image(systemName: "photo.on.rectangle")
-                                .fontWeight(.semibold)
-                            Text("Image")
                                 .fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         .contentShape(Rectangle())
                         .gesture(
@@ -567,38 +576,38 @@ struct PDFFormEditorView: View {
                         }
                     }
 
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                    if showsPencilButton {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.25))
+                            .frame(width: 1, height: toolbarDividerHeight)
+                            .padding(.top, toolbarDividerTopPadding)
 
-                    VStack(spacing: 6) {
-                        Text("Pencil")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            viewModel.setTool(.pencilKit)
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: "pencil.and.outline")
-                                    .symbolVariant(viewModel.activeTool == .pencilKit ? .fill : .none)
-                                    .fontWeight(.semibold)
-                                Text("Pencil")
-                                    .fontWeight(.semibold)
+                        VStack(spacing: 6) {
+                            Text("Pencil")
+                                .font(.caption2)
+                                .tracking(0.5)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                            Button {
+                                viewModel.setTool(.pencilKit)
+                            } label: {
+                                toolbarButtonContent("Pencil") {
+                                    Image(systemName: "pencil.and.outline")
+                                        .symbolVariant(viewModel.activeTool == .pencilKit ? .fill : .none)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundStyle(Color.accentColor)
+                                .padding(toolbarButtonPadding)
+                                .background(viewModel.activeTool == .pencilKit ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
-                            .foregroundStyle(Color.accentColor)
-                            .padding(6)
-                            .background(viewModel.activeTool == .pencilKit ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     // MARK: Settings Section
                     VStack(spacing: 6) {
@@ -610,15 +619,13 @@ struct PDFFormEditorView: View {
                         Button {
                             showEditorSettings.toggle()
                         } label: {
-                            VStack(spacing: 4) {
+                            toolbarButtonContent("Settings") {
                                 Image(systemName: "slider.horizontal.3")
                                     .symbolVariant(showEditorSettings ? .fill : .none)
                                     .fontWeight(.semibold)
-                                Text("Settings")
-                                    .fontWeight(.semibold)
                             }
                             .foregroundStyle(Color.accentColor)
-                            .padding(6)
+                            .padding(toolbarButtonPadding)
                             .background(showEditorSettings ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
@@ -629,6 +636,7 @@ struct PDFFormEditorView: View {
                                 pencilDoubleTapAction: $viewModel.pencilDoubleTapAction,
                                 pencilSqueezeAction: $viewModel.pencilSqueezeAction,
                                 pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction,
+                                toolbarCompact: $viewModel.toolbarCompact,
                                 lineWidthInputStyle: $viewModel.lineWidthInputStyle,
                                 lineWidthStep: $viewModel.lineWidthStep,
                                 lineWidthMax: $viewModel.lineWidthMax
@@ -638,8 +646,8 @@ struct PDFFormEditorView: View {
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
-                        .frame(width: 1, height: 36)
-                        .padding(.top, 14)
+                        .frame(width: 1, height: toolbarDividerHeight)
+                        .padding(.top, toolbarDividerTopPadding)
 
                     VStack(spacing: 6) {
                         Text("Pages")
@@ -652,14 +660,12 @@ struct PDFFormEditorView: View {
                                         insertPageIndex = min(viewModel.currentPageIndex + 1, viewModel.pageCount)
                                         isShowingInsertPageSheet = true
                                     } label: {
-                                        VStack(spacing: 4) {
+                                        toolbarButtonContent("Add") {
                                             Image(systemName: "doc.badge.plus")
                                                 .fontWeight(.semibold)
-                                    Text("Add")
-                                        .fontWeight(.semibold)
                                 }
                                 .foregroundStyle(Color.accentColor)
-                                .padding(6)
+                                .padding(toolbarButtonPadding)
                                 .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
@@ -667,14 +673,12 @@ struct PDFFormEditorView: View {
                             Button {
                                 isShowingRemovePageAlert = true
                             } label: {
-                                VStack(spacing: 4) {
+                                toolbarButtonContent("Remove") {
                                     Image(systemName: "doc")
-                                        .fontWeight(.semibold)
-                                    Text("Remove")
                                         .fontWeight(.semibold)
                                 }
                                 .foregroundStyle(viewModel.pageCount > 1 ? Color.red : Color.secondary)
-                                .padding(6)
+                                .padding(toolbarButtonPadding)
                                 .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
@@ -683,14 +687,12 @@ struct PDFFormEditorView: View {
                             Button {
                                 viewModel.isThumbnailOverlayVisible.toggle()
                             } label: {
-                                VStack(spacing: 4) {
+                                toolbarButtonContent("Preview") {
                                     Image(systemName: viewModel.isThumbnailOverlayVisible ? "inset.filled.bottomthird.rectangle.portrait" : "rectangle.portrait")
-                                        .fontWeight(.semibold)
-                                    Text("Preview")
                                         .fontWeight(.semibold)
                                 }
                                 .foregroundStyle(Color.accentColor)
-                                .padding(6)
+                                .padding(toolbarButtonPadding)
                                 .background(viewModel.isThumbnailOverlayVisible ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
                             .buttonStyle(.plain)
@@ -699,7 +701,14 @@ struct PDFFormEditorView: View {
                 }//: HSTACK
 
             }//: SCROLL
+
+            if showsSelectEditToolbar {
+                selectEditToolbar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }//: VSTACK
+        .animation(.easeInOut(duration: 0.2), value: showsSelectEditToolbar)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.selectedOverlayKind)
         .contentBackgroundModifier()
     }
     
@@ -708,14 +717,13 @@ struct PDFFormEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            VStack(spacing: 4) {
+            toolbarButtonContent("Shape") {
                 Image(systemName: iconName(for: viewModel.activeShapeKind))
                     .symbolVariant(viewModel.isShapeMode ? .fill : .none)
                     .fontWeight(.semibold)
-                Text("Shape").fontWeight(.semibold)
             }
             .foregroundStyle(Color.accentColor)
-            .padding(6)
+            .padding(toolbarButtonPadding)
             .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
             .contentShape(Rectangle())
             .gesture(
@@ -755,55 +763,65 @@ struct PDFFormEditorView: View {
                 Button {
                     viewModel.setTool(.select)
                 } label: {
-                    VStack(spacing: 4) {
+                    toolbarButtonContent("Select") {
                         Image(systemName: "cursorarrow.rays")
                             .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
                             .fontWeight(.semibold)
-                        Text("Select")
-                            .fontWeight(.semibold)
                     }
                     .foregroundStyle(Color.accentColor)
-                    .padding(6)
+                    .padding(toolbarButtonPadding)
                     .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .textBox {
-                    selectTextBoxSubtools
-                }
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .shape {
-                    selectShapeSubtools
-                }
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .image {
-                    selectImageSubtools
-                }
-
-                if viewModel.hasSelectedInkAnnotation || viewModel.hasSelectedOverlayObject {
-                    Button {
-                        viewModel.deleteSelectedSelection()
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "trash")
-                                .fontWeight(.semibold)
-                            Text("Delete")
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.red)
-                        .padding(6)
-                        .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
             }
-            .animation(.linear(duration: 0.2), value: viewModel.selectedOverlayKind)
         }
+    }
+
+    private var showsSelectEditToolbar: Bool {
+        viewModel.activeTool == .select
+            && (viewModel.selectedOverlayKind != nil || viewModel.hasSelectedInkAnnotation || viewModel.hasSelectedOverlayObject)
+    }
+
+    @ViewBuilder
+    private var selectEditToolbar: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if viewModel.selectedOverlayKind == .textBox {
+                selectTextBoxSubtools
+            }
+
+            if viewModel.selectedOverlayKind == .shape {
+                selectShapeSubtools
+            }
+
+            if viewModel.selectedOverlayKind == .image {
+                selectImageSubtools
+            }
+
+            if viewModel.hasSelectedInkAnnotation && viewModel.selectedOverlayKind == nil {
+                deleteSelectionButton
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 10))
+    }
+
+    private var deleteSelectionButton: some View {
+        Button {
+            viewModel.deleteSelectedSelection()
+        } label: {
+            selectEditToolbarChip("Delete") {
+                Image(systemName: "trash")
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
     private var selectImageBorderWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Image border width", isActive: viewModel.imageBorderWidth > 0) {
             Image(systemName: "square.dashed").fontWeight(.semibold)
             Text(
                 LineWidthFormatting.toolbarPointsLabel(
@@ -815,8 +833,6 @@ struct PDFFormEditorView: View {
             .fontWeight(.semibold)
         }
         .foregroundStyle(Color.accentColor)
-        .padding(4)
-        .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
     }
 
     @ViewBuilder
@@ -827,7 +843,8 @@ struct PDFFormEditorView: View {
                 set: { viewModel.commitImageBorderColor(UIColor($0)) }
             ))
             .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
 
             Group {
                 if viewModel.lineWidthInputStyle == .presetButtons {
@@ -863,65 +880,53 @@ struct PDFFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectionButton
         }
     }
     
     @ViewBuilder
     private var selectTextBoxBorderWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Text box border width", isActive: viewModel.selectedTextBoxBorderWidth > 0) {
             Image(systemName: "square.dashed").fontWeight(.semibold)
-            Text(
-                LineWidthFormatting.toolbarPointsLabel(
-                    viewModel.selectedTextBoxBorderWidth,
-                    style: viewModel.lineWidthInputStyle,
-                    step: viewModel.lineWidthStep
-                )
-            )
+            Text(selectedTextBoxBorderWidthLabel)
             .fontWeight(.semibold)
         }
-        .foregroundStyle(Color.accentColor)
-        .padding(4)
-        .background(toolbarChipBackground(isActive: viewModel.selectedTextBoxBorderWidth > 0))
+        .foregroundStyle(selectedTextBoxBorderControlColor)
     }
 
     @ViewBuilder
     private var selectTextBoxSubtools: some View {
         ToolbarSubtoolsScrollRow {
-            Menu {
-                MenuScrollableActions {
-                    Button("Black") { viewModel.textBoxTextColor = .label }
-                    Button("White") { viewModel.textBoxTextColor = .white }
-                    Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
-                    Button("Red") { viewModel.textBoxTextColor = .systemRed }
-                    Button("Green") { viewModel.textBoxTextColor = .systemGreen }
-                }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "square.fill")
-                        .font(.title3).fontWeight(.semibold)
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxTextColor) },
+                set: { viewModel.textBoxTextColor = UIColor($0) }
+            )) {
+                selectEditToolbarChip("Text color") {
+                    Image(systemName: "textformat")
+                        .fontWeight(.semibold)
                         .foregroundStyle(Color(viewModel.textBoxTextColor))
-                    Text("Text").fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+                .foregroundStyle(Color.accentColor)
             }
-            Menu {
-                MenuScrollableActions {
-                    Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
-                    Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
-                    Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
-                    Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
-                    Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
-                    Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxBackgroundColor) },
+                set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+            ), supportsOpacity: true) {
+                selectEditToolbarChip("Background color") {
+                    ZStack {
+                        Image(systemName: "rectangle")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "rectangle.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                    }
                 }
-            } label: {
-                toolbarChip {
-                    Image(systemName: "square.fill")
-                        .font(.title3).fontWeight(.semibold)
-                        .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
-                    Text("BG").fontWeight(.semibold)
-                }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+                .foregroundStyle(Color.accentColor)
             }
+
             Menu {
                 MenuScrollableActions {
                     Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
@@ -930,18 +935,19 @@ struct PDFFormEditorView: View {
                     Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
                 }
             } label: {
-                toolbarChip {
-                    Image(systemName: "textformat.size").font(.title3).fontWeight(.semibold)
-                    Text("\(Int(viewModel.textBoxFontSize))pt").fontWeight(.semibold)
+                selectEditToolbarChip("Font size") {
+                    Image(systemName: "textformat.size").fontWeight(.semibold)
+                    Text("\(Int(viewModel.textBoxFontSize))pt")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+                .foregroundStyle(Color.accentColor)
             }
             Button { viewModel.textBoxIsBold.toggle() } label: {
-                toolbarChip {
-                    Image(systemName: "bold").font(.title3).fontWeight(.semibold)
-                    Text("Bold").fontWeight(.semibold)
+                selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
+                    Image(systemName: "bold").fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
+                .foregroundStyle(Color.accentColor)
             }
             .buttonStyle(.plain)
             Menu {
@@ -963,12 +969,11 @@ struct PDFFormEditorView: View {
                     }
                 }
             } label: {
-                toolbarChip {
+                selectEditToolbarChip("Text alignment") {
                     Image(systemName: alignmentIcon(for: viewModel.textBoxTextAlignment))
-                        .font(.title3).fontWeight(.semibold)
-                    Text("Align").fontWeight(.semibold)
+                        .fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+                .foregroundStyle(Color.accentColor)
             }
             Menu {
                 MenuScrollableActions {
@@ -989,65 +994,46 @@ struct PDFFormEditorView: View {
                     }
                 }
             } label: {
-                toolbarChip {
+                selectEditToolbarChip("Vertical alignment") {
                     Image(systemName: verticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
-                        .font(.title3).fontWeight(.semibold)
-                    Text("V-Align").fontWeight(.semibold)
+                        .fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+                .foregroundStyle(Color.accentColor)
             }
 
             Button { viewModel.toggleSelectedTextBoxAutoResize() } label: {
-                toolbarChip {
+                selectEditToolbarChip("Auto size", isActive: viewModel.selectedTextBoxAutoResize) {
                     Image(systemName: "arrow.up.and.down")
-                        .font(.title3).fontWeight(.semibold)
-                    Text("Auto Size").fontWeight(.semibold)
+                        .fontWeight(.semibold)
                 }
-                .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.selectedTextBoxAutoResize))
+                .foregroundStyle(Color.accentColor)
             }
             .buttonStyle(.plain)
 
-            ColorPicker("", selection: Binding(
-                get: { Color(viewModel.selectedTextBoxBorderColor) },
-                set: { viewModel.commitSelectedTextBoxBorderColor(UIColor($0)) }
-            ))
-            .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-
-            Group {
-                if viewModel.lineWidthInputStyle == .presetButtons {
-                    Menu {
-                        MenuScrollableActions {
-                            Button("None") { viewModel.commitSelectedTextBoxBorderWidth(0) }
-                            Button("Thin (1pt)") { viewModel.commitSelectedTextBoxBorderWidth(1) }
-                            Button("Medium (2pt)") { viewModel.commitSelectedTextBoxBorderWidth(2) }
-                            Button("Thick (4pt)") { viewModel.commitSelectedTextBoxBorderWidth(4) }
-                            Button("Heavy (6pt)") { viewModel.commitSelectedTextBoxBorderWidth(6) }
-                        }
-                    } label: {
-                        selectTextBoxBorderWidthChipLabel
-                    }
-                } else {
-                    Button {
-                        showSelectTextBorderWidthPopover = true
-                    } label: {
-                        selectTextBoxBorderWidthChipLabel
-                    }
-                    .buttonStyle(.plain)
-                    .popover(isPresented: $showSelectTextBorderWidthPopover, arrowEdge: .top) {
-                        ToolbarLineWidthStepperPanel(
-                            width: Binding(
-                                get: { viewModel.selectedTextBoxBorderWidth },
-                                set: { viewModel.commitSelectedTextBoxBorderWidth($0) }
-                            ),
-                            step: viewModel.lineWidthStep,
-                            max: viewModel.lineWidthMax,
-                            allowsZero: true,
-                            title: "Border width"
-                        )
-                    }
-                }
+            Button {
+                showSelectTextBorderWidthPopover = true
+            } label: {
+                selectTextBoxBorderWidthChipLabel
             }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showSelectTextBorderWidthPopover, arrowEdge: .top) {
+                ToolbarBorderWidthColorPanel(
+                    width: Binding(
+                        get: { viewModel.selectedTextBoxBorderWidth },
+                        set: { viewModel.commitSelectedTextBoxBorderWidth($0) }
+                    ),
+                    color: Binding(
+                        get: { Color(viewModel.selectedTextBoxBorderColor) },
+                        set: { viewModel.commitSelectedTextBoxBorderColor(UIColor($0)) }
+                    ),
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep,
+                    max: viewModel.lineWidthMax,
+                    title: "Text box border"
+                )
+            }
+
+            deleteSelectionButton
         }
     }
 
@@ -1067,9 +1053,22 @@ struct PDFFormEditorView: View {
         }
     }
 
+    private var selectedTextBoxBorderWidthLabel: String {
+        guard viewModel.selectedTextBoxBorderWidth > 0 else { return "No" }
+        return LineWidthFormatting.toolbarPointsLabel(
+            viewModel.selectedTextBoxBorderWidth,
+            style: viewModel.lineWidthInputStyle,
+            step: viewModel.lineWidthStep
+        )
+    }
+
+    private var selectedTextBoxBorderControlColor: Color {
+        viewModel.selectedTextBoxBorderWidth > 0 ? Color(viewModel.selectedTextBoxBorderColor) : Color.accentColor
+    }
+
     @ViewBuilder
     private var selectShapeLineWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Stroke width") {
             Image(systemName: "lineweight").fontWeight(.semibold)
             Text(
                 LineWidthFormatting.shapeStrokeLabel(
@@ -1080,18 +1079,29 @@ struct PDFFormEditorView: View {
             )
             .fontWeight(.semibold)
         }
-        .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+        .foregroundStyle(Color.accentColor)
     }
 
     @ViewBuilder
     private var selectShapeSubtools: some View {
         ToolbarSubtoolsScrollRow {
+            Menu {
+                shapeKindMenuActions
+            } label: {
+                selectEditToolbarChip("Shape kind") {
+                    Image(systemName: iconName(for: viewModel.activeShapeKind))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
             ColorPicker("", selection: Binding(
                 get: { Color(viewModel.shapeStrokeColor) },
                 set: { viewModel.shapeStrokeColor = UIColor($0) }
             ))
             .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
             Group {
                 if viewModel.lineWidthInputStyle == .presetButtons {
                     Menu {
@@ -1122,6 +1132,27 @@ struct PDFFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectionButton
+        }
+    }
+
+    @ViewBuilder
+    private var shapeKindMenuActions: some View {
+        Button {
+            viewModel.activeShapeKind = .circle
+        } label: {
+            Label("Circle", systemImage: iconName(for: .circle))
+        }
+        Button {
+            viewModel.activeShapeKind = .rectangle
+        } label: {
+            Label("Rectangle", systemImage: iconName(for: .rectangle))
+        }
+        Button {
+            viewModel.activeShapeKind = .triangle
+        } label: {
+            Label("Triangle", systemImage: iconName(for: .triangle))
         }
     }
 
@@ -1133,6 +1164,35 @@ struct PDFFormEditorView: View {
         .multilineTextAlignment(.center)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+    }
+
+    private func selectEditToolbarChip<Content: View>(
+        _ accessibilityLabel: String,
+        isActive: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 1) {
+            content()
+        }
+        .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height, alignment: .center)
+        .multilineTextAlignment(.center)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .background(toolbarChipBackground(isActive: isActive))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    private func toolbarButtonContent<Icon: View>(_ title: String, @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: viewModel.toolbarCompact ? 0 : 4) {
+            icon()
+            if !viewModel.toolbarCompact {
+                Text(title)
+                    .fontWeight(.semibold)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
     }
 
     private func toolbarChipBackground(isActive: Bool = false) -> some View {
@@ -1245,6 +1305,13 @@ struct ImagePicker: UIViewControllerRepresentable {
             picker.dismiss(animated: true)
         }
     }
+}
+
+/// Wraps a URL in an Identifiable so `.sheet(item:)` always creates a
+/// fresh UIActivityViewController for each export, preventing stale shares.
+private struct ShareableURL: Identifiable {
+    let id = UUID()
+    let url: URL
 }
 
 struct ActivityView: UIViewControllerRepresentable {

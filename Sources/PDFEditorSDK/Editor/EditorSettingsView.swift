@@ -15,6 +15,7 @@ struct EditorSettingsView: View {
     @Binding var pencilDoubleTapAction: PencilGestureAction
     @Binding var pencilSqueezeAction: PencilGestureAction
     @Binding var pencilDoubleSqueezeAction: PencilGestureAction
+    @Binding var toolbarCompact: Bool
     @Binding var lineWidthInputStyle: LineWidthInputStyle
     @Binding var lineWidthStep: CGFloat
     @Binding var lineWidthMax: CGFloat
@@ -23,7 +24,33 @@ struct EditorSettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
 
+                // MARK: - Toolbar
+
+                Text("Toolbar")
+                    .font(.footnote)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 8)
+
+                Divider()
+
+                Toggle(isOn: $toolbarCompact) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label("Compact toolbar", systemImage: "rectangle.compress.vertical")
+                            .fontWeight(.medium)
+                        Text("Hide repeated button names while keeping section titles visible.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
                 // MARK: - Input Mode
+
+                Divider()
 
                 Text("Input Mode")
                     .font(.footnote)

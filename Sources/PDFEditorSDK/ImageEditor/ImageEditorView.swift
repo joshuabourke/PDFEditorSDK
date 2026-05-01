@@ -14,30 +14,51 @@ import PencilKit
 public struct ImageEditorView: View {
     @State private var viewModel: ImageEditorViewModel
     let showsDismissButton: Bool
+    let showsHighlightButton: Bool
+    let showsLockButton: Bool
+    let showsPencilButton: Bool
 
     public init(
         image: UIImage,
         showsDismissButton: Bool = false,
+        showsHighlightButton: Bool = true,
+        showsLockButton: Bool = true,
+        showsPencilButton: Bool = true,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
         _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
         self.showsDismissButton = showsDismissButton
+        self.showsHighlightButton = showsHighlightButton
+        self.showsLockButton = showsLockButton
+        self.showsPencilButton = showsPencilButton
     }
 
     public init(
         imageData: Data,
         showsDismissButton: Bool = false,
+        showsHighlightButton: Bool = true,
+        showsLockButton: Bool = true,
+        showsPencilButton: Bool = true,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
         let image = UIImage(data: imageData) ?? UIImage()
         _viewModel = State(initialValue: ImageEditorViewModel(sourceImage: image, onSave: onSave, onExport: onExport))
         self.showsDismissButton = showsDismissButton
+        self.showsHighlightButton = showsHighlightButton
+        self.showsLockButton = showsLockButton
+        self.showsPencilButton = showsPencilButton
     }
 
     public var body: some View {
-        ImageFormEditorView(viewModel: viewModel, showsDismissButton: showsDismissButton)
+        ImageFormEditorView(
+            viewModel: viewModel,
+            showsDismissButton: showsDismissButton,
+            showsHighlightButton: showsHighlightButton,
+            showsLockButton: showsLockButton,
+            showsPencilButton: showsPencilButton
+        )
     }
 }
 
@@ -46,8 +67,23 @@ public struct ImageEditorView: View {
 struct ImageFormEditorView: View {
     @Bindable var viewModel: ImageEditorViewModel
     var showsDismissButton = false
+    var showsHighlightButton = true
+    var showsLockButton = true
+    var showsPencilButton = true
     @Environment(\.dismiss) private var dismiss
-    private let toolbarChipSize = CGSize(width: 56, height: 50)
+    private var toolbarChipSize: CGSize {
+        viewModel.toolbarCompact ? CGSize(width: 44, height: 40) : CGSize(width: 56, height: 50)
+    }
+    private var toolbarButtonPadding: CGFloat {
+        viewModel.toolbarCompact ? 8 : 6
+    }
+    private var toolbarDividerHeight: CGFloat {
+        viewModel.toolbarCompact ? 30 : 36
+    }
+    private var toolbarDividerTopPadding: CGFloat {
+        viewModel.toolbarCompact ? 12 : 14
+    }
+    private let selectEditToolbarChipSize = CGSize(width: 36, height: 36)
     @State private var isShowingImagePicker = false
     @State private var imagePickerSource: ImagePickerSource = .photoLibrary
     @State private var isShowingSaveAlert = false
@@ -159,6 +195,7 @@ struct ImageFormEditorView: View {
         .onChange(of: viewModel.textBoxBackgroundColor) { _, _ in
             viewModel.applyTextStyleToSelected()
         }
+        .onChange(of: viewModel.activeShapeKind) { _, _ in viewModel.applyShapeStyleToSelected() }
         .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
         .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
         .alert("Unsaved Changes", isPresented: $changesNotSaved) {
@@ -198,14 +235,13 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Draw") {
                             Image(systemName: "pencil.and.scribble")
                                 .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Draw").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(
                             viewModel.isDrawingMode && !viewModel.isEraserMode
                                 ? Color.accentColor.opacity(0.3)
@@ -247,14 +283,13 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Erase") {
                             Image(systemName: "eraser")
                                 .symbolVariant(viewModel.isEraserMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Erase").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(
                             viewModel.isEraserMode
                                 ? Color.accentColor.opacity(0.3)
@@ -287,14 +322,13 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Text") {
                             Image(systemName: "character.cursor.ibeam")
                                 .symbolVariant(viewModel.isTextMode ? .fill : .none)
                                 .fontWeight(.semibold)
-                            Text("Text").fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         .contentShape(Rectangle())
                         .gesture(
@@ -347,14 +381,12 @@ struct ImageFormEditorView: View {
                             .tracking(0.5)
                             .fontWeight(.semibold)
                             .foregroundStyle(.secondary)
-                        VStack(spacing: 4) {
+                        toolbarButtonContent("Image") {
                             Image(systemName: "photo.on.rectangle")
-                                .fontWeight(.semibold)
-                            Text("Image")
                                 .fontWeight(.semibold)
                         }
                         .foregroundStyle(Color.accentColor)
-                        .padding(6)
+                        .padding(toolbarButtonPadding)
                         .background(Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         .contentShape(Rectangle())
                         .gesture(
@@ -401,30 +433,30 @@ struct ImageFormEditorView: View {
                         }
                     }
 
-                    toolbarDivider
+                    if showsPencilButton {
+                        toolbarDivider
 
-                    // MARK: PencilKit Section
-                    VStack(spacing: 6) {
-                        Text("Pencil")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        Button {
-                            viewModel.setTool(.pencilKit)
-                        } label: {
-                            VStack(spacing: 4) {
-                                Image(systemName: "pencil.and.outline")
-                                    .symbolVariant(viewModel.activeTool == .pencilKit ? .fill : .none)
-                                    .fontWeight(.semibold)
-                                Text("Pencil")
-                                    .fontWeight(.semibold)
+                        // MARK: PencilKit Section
+                        VStack(spacing: 6) {
+                            Text("Pencil")
+                                .font(.caption2)
+                                .tracking(0.5)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+                            Button {
+                                viewModel.setTool(.pencilKit)
+                            } label: {
+                                toolbarButtonContent("Pencil") {
+                                    Image(systemName: "pencil.and.outline")
+                                        .symbolVariant(viewModel.activeTool == .pencilKit ? .fill : .none)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundStyle(Color.accentColor)
+                                .padding(toolbarButtonPadding)
+                                .background(viewModel.activeTool == .pencilKit ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                             }
-                            .foregroundStyle(Color.accentColor)
-                            .padding(6)
-                            .background(viewModel.activeTool == .pencilKit ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
 
                     toolbarDivider
@@ -439,15 +471,13 @@ struct ImageFormEditorView: View {
                         Button {
                             showEditorSettings.toggle()
                         } label: {
-                            VStack(spacing: 4) {
+                            toolbarButtonContent("Settings") {
                                 Image(systemName: "slider.horizontal.3")
                                     .symbolVariant(showEditorSettings ? .fill : .none)
                                     .fontWeight(.semibold)
-                                Text("Settings")
-                                    .fontWeight(.semibold)
                             }
                             .foregroundStyle(Color.accentColor)
-                            .padding(6)
+                            .padding(toolbarButtonPadding)
                             .background(showEditorSettings ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
@@ -458,6 +488,7 @@ struct ImageFormEditorView: View {
                                 pencilDoubleTapAction: $viewModel.pencilDoubleTapAction,
                                 pencilSqueezeAction: $viewModel.pencilSqueezeAction,
                                 pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction,
+                                toolbarCompact: $viewModel.toolbarCompact,
                                 lineWidthInputStyle: $viewModel.lineWidthInputStyle,
                                 lineWidthStep: $viewModel.lineWidthStep,
                                 lineWidthMax: $viewModel.lineWidthMax
@@ -467,7 +498,14 @@ struct ImageFormEditorView: View {
 
                 }//: HSTACK
             }//: SCROLL
+
+            if showsImageSelectEditToolbar {
+                imageSelectEditToolbar
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }//: VSTACK
+        .animation(.easeInOut(duration: 0.2), value: showsImageSelectEditToolbar)
+        .animation(.easeInOut(duration: 0.2), value: viewModel.selectedOverlayKind)
         .contentBackgroundModifier()
     }
 
@@ -476,8 +514,8 @@ struct ImageFormEditorView: View {
     private var toolbarDivider: some View {
         Rectangle()
             .fill(Color.secondary.opacity(0.25))
-            .frame(width: 1, height: 36)
-            .padding(.top, 14)
+            .frame(width: 1, height: toolbarDividerHeight)
+            .padding(.top, toolbarDividerTopPadding)
     }
 
     private func toolbarChip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -488,6 +526,35 @@ struct ImageFormEditorView: View {
         .multilineTextAlignment(.center)
         .lineLimit(1)
         .minimumScaleFactor(0.75)
+    }
+
+    private func selectEditToolbarChip<Content: View>(
+        _ accessibilityLabel: String,
+        isActive: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 1) {
+            content()
+        }
+        .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height, alignment: .center)
+        .multilineTextAlignment(.center)
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        .background(toolbarChipBackground(isActive: isActive))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+
+    private func toolbarButtonContent<Icon: View>(_ title: String, @ViewBuilder icon: () -> Icon) -> some View {
+        VStack(spacing: viewModel.toolbarCompact ? 0 : 4) {
+            icon()
+            if !viewModel.toolbarCompact {
+                Text(title)
+                    .fontWeight(.semibold)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(title))
     }
 
     private func toolbarChipBackground(isActive: Bool = false) -> some View {
@@ -517,14 +584,13 @@ struct ImageFormEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            VStack(spacing: 4) {
+            toolbarButtonContent("Shape") {
                 Image(systemName: iconName(for: viewModel.activeShapeKind))
                     .symbolVariant(viewModel.isShapeMode ? .fill : .none)
                     .fontWeight(.semibold)
-                Text("Shape").fontWeight(.semibold)
             }
             .foregroundStyle(Color.accentColor)
-            .padding(6)
+            .padding(toolbarButtonPadding)
             .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
             .contentShape(Rectangle())
             .gesture(
@@ -565,99 +631,98 @@ struct ImageFormEditorView: View {
                 Button {
                     viewModel.setTool(.select)
                 } label: {
-                    VStack(spacing: 4) {
+                    toolbarButtonContent("Select") {
                         Image(systemName: "cursorarrow.rays")
                             .symbolVariant(viewModel.activeTool == .select ? .fill : .none)
                             .fontWeight(.semibold)
-                        Text("Select")
-                            .fontWeight(.semibold)
                     }
                     .foregroundStyle(Color.accentColor)
-                    .padding(6)
+                    .padding(toolbarButtonPadding)
                     .background(viewModel.activeTool == .select ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
                 }
                 .buttonStyle(.plain)
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .textBox {
-                    imageSelectTextBoxSubtools
-                }
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .shape {
-                    imageSelectShapeSubtools
-                }
-
-                if viewModel.activeTool == .select && viewModel.selectedOverlayKind == .image {
-                    imageSelectImageSubtools
-                }
-
-                if viewModel.hasSelectedOverlayObject {
-                    Button {
-                        viewModel.deleteSelectedObject()
-                    } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "trash")
-                                .fontWeight(.semibold)
-                            Text("Delete")
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(.red)
-                        .padding(6)
-                        .background(Color.red.opacity(0.1), in: .rect(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
             }
-            .animation(.linear(duration: 0.2), value: viewModel.selectedOverlayKind)
         }
     }
 
+    private var showsImageSelectEditToolbar: Bool {
+        viewModel.activeTool == .select
+            && (viewModel.selectedOverlayKind != nil || viewModel.hasSelectedOverlayObject)
+    }
+
+    @ViewBuilder private var imageSelectEditToolbar: some View {
+        HStack(alignment: .center, spacing: 8) {
+            if viewModel.selectedOverlayKind == .textBox {
+                imageSelectTextBoxSubtools
+            }
+
+            if viewModel.selectedOverlayKind == .shape {
+                imageSelectShapeSubtools
+            }
+
+            if viewModel.selectedOverlayKind == .image {
+                imageSelectImageSubtools
+            }
+
+            if viewModel.hasSelectedOverlayObject && viewModel.selectedOverlayKind == nil {
+                deleteSelectedObjectButton
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 10))
+    }
+
+    private var deleteSelectedObjectButton: some View {
+        Button {
+            viewModel.deleteSelectedObject()
+        } label: {
+            selectEditToolbarChip("Delete") {
+                Image(systemName: "trash")
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(.red)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var imageSelectTextBoxSubtools: some View {
-        VStack(spacing: 4) {
-            ToolbarSubtoolsScrollRow {
-                imageSelectTextBoxStyleControls
-            }
-            ToolbarSubtoolsScrollRow {
-                imageSelectTextBoxBorderControls
-            }
+        ToolbarSubtoolsScrollRow {
+            imageSelectTextBoxStyleControls
+            imageSelectTextBoxBorderControls
         }
     }
 
     @ViewBuilder private var imageSelectTextBoxStyleControls: some View {
-        Menu {
-            MenuScrollableActions {
-                Button("Black") { viewModel.textBoxTextColor = .label }
-                Button("White") { viewModel.textBoxTextColor = .white }
-                Button("Blue") { viewModel.textBoxTextColor = .systemBlue }
-                Button("Red") { viewModel.textBoxTextColor = .systemRed }
-                Button("Green") { viewModel.textBoxTextColor = .systemGreen }
-            }
-        } label: {
-            toolbarChip {
-                Image(systemName: "square.fill")
-                    .font(.title3).fontWeight(.semibold)
+        ColorPicker(selection: Binding(
+            get: { Color(viewModel.textBoxTextColor) },
+            set: { viewModel.textBoxTextColor = UIColor($0) }
+        )) {
+            selectEditToolbarChip("Text color") {
+                Image(systemName: "textformat")
+                    .fontWeight(.semibold)
                     .foregroundStyle(Color(viewModel.textBoxTextColor))
-                Text("Text").fontWeight(.semibold)
             }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
         }
-        Menu {
-            MenuScrollableActions {
-                Button("White") { viewModel.textBoxBackgroundColor = UIColor.white }
-                Button("Yellow") { viewModel.textBoxBackgroundColor = UIColor.systemYellow }
-                Button("Blue") { viewModel.textBoxBackgroundColor = UIColor.systemBlue }
-                Button("Green") { viewModel.textBoxBackgroundColor = UIColor.systemGreen }
-                Button("Pink") { viewModel.textBoxBackgroundColor = UIColor.systemPink }
-                Button("Clear") { viewModel.textBoxBackgroundColor = UIColor.clear }
+
+        ColorPicker(selection: Binding(
+            get: { Color(viewModel.textBoxBackgroundColor) },
+            set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+        ), supportsOpacity: true) {
+            selectEditToolbarChip("Background color") {
+                ZStack {
+                    Image(systemName: "rectangle")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "rectangle.fill")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                }
             }
-        } label: {
-            toolbarChip {
-                Image(systemName: "square.fill")
-                    .font(.title3).fontWeight(.semibold)
-                    .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
-                Text("BG").fontWeight(.semibold)
-            }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
         }
+
         Menu {
             MenuScrollableActions {
                 Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
@@ -666,20 +731,31 @@ struct ImageFormEditorView: View {
                 Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
             }
         } label: {
-            toolbarChip {
-                Image(systemName: "textformat.size").font(.title3).fontWeight(.semibold)
-                Text("\(Int(viewModel.textBoxFontSize))pt").fontWeight(.semibold)
+            selectEditToolbarChip("Font size") {
+                Image(systemName: "textformat.size").fontWeight(.semibold)
+                Text("\(Int(viewModel.textBoxFontSize))pt")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
             }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
         }
         Button { viewModel.textBoxIsBold.toggle() } label: {
-            toolbarChip {
-                Image(systemName: "bold").font(.title3).fontWeight(.semibold)
-                Text("Bold").fontWeight(.semibold)
+            selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
+                Image(systemName: "bold").fontWeight(.semibold)
             }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground(isActive: viewModel.textBoxIsBold))
+            .foregroundStyle(Color.accentColor)
         }
         .buttonStyle(.plain)
+
+        Button { viewModel.toggleSelectedTextBoxAutoResize() } label: {
+            selectEditToolbarChip("Auto size", isActive: viewModel.selectedTextBoxAutoResize) {
+                Image(systemName: "arrow.up.and.down")
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+
         Menu {
             MenuScrollableActions {
                 Button { viewModel.textBoxTextAlignment = .left } label: {
@@ -693,12 +769,11 @@ struct ImageFormEditorView: View {
                 }
             }
         } label: {
-            toolbarChip {
+            selectEditToolbarChip("Text alignment") {
                 Image(systemName: imageAlignmentIcon(for: viewModel.textBoxTextAlignment))
-                    .font(.title3).fontWeight(.semibold)
-                Text("Align").fontWeight(.semibold)
+                    .fontWeight(.semibold)
             }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
         }
         Menu {
             MenuScrollableActions {
@@ -713,34 +788,25 @@ struct ImageFormEditorView: View {
                 }
             }
         } label: {
-            toolbarChip {
+            selectEditToolbarChip("Vertical alignment") {
                 Image(systemName: imageVerticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
-                    .font(.title3).fontWeight(.semibold)
-                Text("V-Align").fontWeight(.semibold)
+                    .fontWeight(.semibold)
             }
-            .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+            .foregroundStyle(Color.accentColor)
         }
     }
 
     @ViewBuilder private var imageSelectTextBoxBorderWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Text box border width", isActive: viewModel.selectedTextBoxBorderWidth > 0) {
             Image(systemName: "square.dashed").fontWeight(.semibold)
-            Text(
-                LineWidthFormatting.toolbarPointsLabel(
-                    viewModel.selectedTextBoxBorderWidth,
-                    style: viewModel.lineWidthInputStyle,
-                    step: viewModel.lineWidthStep
-                )
-            )
+            Text(selectedTextBoxBorderWidthLabel)
             .fontWeight(.semibold)
         }
-        .foregroundStyle(Color.accentColor)
-        .padding(4)
-        .background(toolbarChipBackground(isActive: viewModel.selectedTextBoxBorderWidth > 0))
+        .foregroundStyle(selectedTextBoxBorderControlColor)
     }
 
     @ViewBuilder private var imageSelectShapeLineWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Stroke width") {
             Image(systemName: "lineweight").fontWeight(.semibold)
             Text(
                 LineWidthFormatting.shapeStrokeLabel(
@@ -751,11 +817,11 @@ struct ImageFormEditorView: View {
             )
             .fontWeight(.semibold)
         }
-        .foregroundStyle(Color.accentColor).padding(4).background(toolbarChipBackground())
+        .foregroundStyle(Color.accentColor)
     }
 
     @ViewBuilder private var imageSelectImageBorderWidthChipLabel: some View {
-        toolbarChip {
+        selectEditToolbarChip("Image border width", isActive: viewModel.imageBorderWidth > 0) {
             Image(systemName: "square.dashed").fontWeight(.semibold)
             Text(
                 LineWidthFormatting.toolbarPointsLabel(
@@ -767,52 +833,33 @@ struct ImageFormEditorView: View {
             .fontWeight(.semibold)
         }
         .foregroundStyle(Color.accentColor)
-        .padding(4)
-        .background(toolbarChipBackground(isActive: viewModel.imageBorderWidth > 0))
     }
 
     @ViewBuilder private var imageSelectTextBoxBorderControls: some View {
-        ColorPicker("", selection: Binding(
-            get: { Color(viewModel.selectedTextBoxBorderColor) },
-            set: { viewModel.commitSelectedTextBoxBorderColor(UIColor($0)) }
-        ))
-        .labelsHidden()
-        .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
-
-        Group {
-            if viewModel.lineWidthInputStyle == .presetButtons {
-                Menu {
-                    MenuScrollableActions {
-                        Button("None") { viewModel.commitSelectedTextBoxBorderWidth(0) }
-                        Button("Thin (1pt)") { viewModel.commitSelectedTextBoxBorderWidth(1) }
-                        Button("Medium (2pt)") { viewModel.commitSelectedTextBoxBorderWidth(2) }
-                        Button("Thick (4pt)") { viewModel.commitSelectedTextBoxBorderWidth(4) }
-                        Button("Heavy (6pt)") { viewModel.commitSelectedTextBoxBorderWidth(6) }
-                    }
-                } label: {
-                    imageSelectTextBoxBorderWidthChipLabel
-                }
-            } else {
-                Button {
-                    showImageSelectTextBorderWidthPopover = true
-                } label: {
-                    imageSelectTextBoxBorderWidthChipLabel
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: $showImageSelectTextBorderWidthPopover, arrowEdge: .top) {
-                    ToolbarLineWidthStepperPanel(
-                        width: Binding(
-                            get: { viewModel.selectedTextBoxBorderWidth },
-                            set: { viewModel.commitSelectedTextBoxBorderWidth($0) }
-                        ),
-                        step: viewModel.lineWidthStep,
-                        max: viewModel.lineWidthMax,
-                        allowsZero: true,
-                        title: "Border width"
-                    )
-                }
-            }
+        Button {
+            showImageSelectTextBorderWidthPopover = true
+        } label: {
+            imageSelectTextBoxBorderWidthChipLabel
         }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showImageSelectTextBorderWidthPopover, arrowEdge: .top) {
+            ToolbarBorderWidthColorPanel(
+                width: Binding(
+                    get: { viewModel.selectedTextBoxBorderWidth },
+                    set: { viewModel.commitSelectedTextBoxBorderWidth($0) }
+                ),
+                color: Binding(
+                    get: { Color(viewModel.selectedTextBoxBorderColor) },
+                    set: { viewModel.commitSelectedTextBoxBorderColor(UIColor($0)) }
+                ),
+                style: viewModel.lineWidthInputStyle,
+                step: viewModel.lineWidthStep,
+                max: viewModel.lineWidthMax,
+                title: "Text box border"
+            )
+        }
+
+        deleteSelectedObjectButton
     }
 
     private func imageAlignmentIcon(for alignment: NSTextAlignment) -> String {
@@ -831,14 +878,38 @@ struct ImageFormEditorView: View {
         }
     }
 
+    private var selectedTextBoxBorderWidthLabel: String {
+        guard viewModel.selectedTextBoxBorderWidth > 0 else { return "No" }
+        return LineWidthFormatting.toolbarPointsLabel(
+            viewModel.selectedTextBoxBorderWidth,
+            style: viewModel.lineWidthInputStyle,
+            step: viewModel.lineWidthStep
+        )
+    }
+
+    private var selectedTextBoxBorderControlColor: Color {
+        viewModel.selectedTextBoxBorderWidth > 0 ? Color(viewModel.selectedTextBoxBorderColor) : Color.accentColor
+    }
+
     @ViewBuilder private var imageSelectShapeSubtools: some View {
         ToolbarSubtoolsScrollRow {
+            Menu {
+                shapeKindMenuActions
+            } label: {
+                selectEditToolbarChip("Shape kind") {
+                    Image(systemName: iconName(for: viewModel.activeShapeKind))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
             ColorPicker("", selection: Binding(
                 get: { Color(viewModel.shapeStrokeColor) },
                 set: { viewModel.shapeStrokeColor = UIColor($0) }
             ))
             .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
             Group {
                 if viewModel.lineWidthInputStyle == .presetButtons {
                     Menu {
@@ -869,6 +940,26 @@ struct ImageFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectedObjectButton
+        }
+    }
+
+    @ViewBuilder private var shapeKindMenuActions: some View {
+        Button {
+            viewModel.activeShapeKind = .circle
+        } label: {
+            Label("Circle", systemImage: iconName(for: .circle))
+        }
+        Button {
+            viewModel.activeShapeKind = .rectangle
+        } label: {
+            Label("Rectangle", systemImage: iconName(for: .rectangle))
+        }
+        Button {
+            viewModel.activeShapeKind = .triangle
+        } label: {
+            Label("Triangle", systemImage: iconName(for: .triangle))
         }
     }
 
@@ -879,7 +970,8 @@ struct ImageFormEditorView: View {
                 set: { viewModel.commitImageBorderColor(UIColor($0)) }
             ))
             .labelsHidden()
-            .frame(width: toolbarChipSize.width, height: toolbarChipSize.height)
+        .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+        .background(toolbarChipBackground())
 
             Group {
                 if viewModel.lineWidthInputStyle == .presetButtons {
@@ -915,6 +1007,8 @@ struct ImageFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectedObjectButton
         }
     }
 }
@@ -1774,15 +1868,15 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func updateShapeBox(from state: OverlayShapeState) {
         guard let box = shapeBoxViews[state.id] else { return }
         box.frame = state.frame
-        box.applyStyle(strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.applyStyle(kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
     }
 
-    func applyShapeStyleToSelected(strokeColor: UIColor, lineWidth: CGFloat) {
+    func applyShapeStyleToSelected(kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
         guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
         let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
-        box.applyStyle(strokeColor: strokeColor, lineWidth: lineWidth)
-        let after = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-        if before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
+        box.applyStyle(kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        if before.kind != after.kind || before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
             viewModel?.didMakeChange(.imageShapeUpdate(before: before, after: after))
         }
     }
@@ -1793,6 +1887,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         selectedImageBoxID = nil
         viewModel?.selectedOverlayKind = .shape
         if let box = shapeBoxViews[id] {
+            viewModel?.activeShapeKind = box.shapeKind
             viewModel?.shapeStrokeColor = box.strokeColor
             viewModel?.shapeLineWidth = box.lineWidth
         }
@@ -1873,6 +1968,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setAutoResize(state.autoResizeEnabled)
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
         if selectedTextBoxID == state.id {
+            viewModel?.selectedTextBoxAutoResize = state.autoResizeEnabled
             viewModel?.selectedTextBoxBorderWidth = state.borderWidth
             viewModel?.selectedTextBoxBorderColor = state.borderColor
         }
@@ -1920,6 +2016,16 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setBackground(backgroundColor)
         box.setTextAlignment(textAlignment)
         box.setVerticalAlignment(verticalAlignment)
+    }
+
+    func setSelectedTextBoxAutoResize(_ enabled: Bool) {
+        guard let id = selectedTextBoxID,
+              let box = textBoxViews[id],
+              let before = textBoxState(id: id),
+              before.autoResizeEnabled != enabled else { return }
+        box.setAutoResize(enabled)
+        let after = textBoxState(id: id)!
+        viewModel?.didMakeChange(.textBoxUpdate(before: before, after: after))
     }
 
     // MARK: - Overlay Image Box Methods
@@ -2019,6 +2125,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         selectedShapeID = nil
         viewModel?.selectedOverlayKind = .textBox
         if let box = textBoxViews[id] {
+            viewModel?.selectedTextBoxAutoResize = box.currentAutoResize
             viewModel?.selectedTextBoxBorderWidth = box.currentBorderWidth
             viewModel?.selectedTextBoxBorderColor = box.currentBorderColor
         }

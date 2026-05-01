@@ -211,10 +211,25 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         updateOverflowIndicator()
     }
 
+    /// Backward-compatible entry point used by tap-create code paths.
+    /// Keeps auto-resize enabled and optionally clamps the initial width.
+    func setTapCreateAutoResize(enabled: Bool, maxWidth: CGFloat) {
+        setAutoResize(enabled)
+        guard enabled, maxWidth > 0 else { return }
+        if frame.width > maxWidth {
+            frame = CGRect(origin: frame.origin, size: CGSize(width: maxWidth, height: frame.height))
+            autoExpandIfNeeded()
+        }
+    }
+
     func updateBorder(width: CGFloat, color: UIColor) {
         _borderWidth = width
         _borderColor = color
-        applyUserBorder()
+        if isSelected {
+            updateSelectionUI()
+        } else {
+            applyUserBorder()
+        }
     }
 
     private func applyUserBorder() {
@@ -310,6 +325,7 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
 
     func setSelected(_ selected: Bool) {
         isSelected = selected
+        updateSelectionUI()
     }
     
     func setSelectMode(_ enabled: Bool) {
@@ -931,7 +947,10 @@ final class ShapeBoxView: UIView {
         }
     }
 
-    func applyStyle(strokeColor: UIColor, lineWidth: CGFloat) {
+    func applyStyle(kind: OverlayShapeKind? = nil, strokeColor: UIColor, lineWidth: CGFloat) {
+        if let kind {
+            self.shapeKind = kind
+        }
         self.strokeColor = strokeColor
         self.lineWidth = lineWidth
         setNeedsDisplay()

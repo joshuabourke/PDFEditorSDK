@@ -23,22 +23,15 @@ struct MenuScrollableActions<Content: View>: View {
     }
 }
 
-/// Many toolbar chips in one row: caps width so the strip scrolls horizontally instead of clipping.
+/// Many toolbar chips in one fixed row.
 struct ToolbarSubtoolsScrollRow<Content: View>: View {
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @ViewBuilder var content: () -> Content
 
-    private var maxStripWidth: CGFloat {
-        horizontalSizeClass == .compact ? 300 : 540
-    }
-
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            HStack(alignment: .center, spacing: 8) {
-                content()
-            }
+        HStack(alignment: .center, spacing: 8) {
+            content()
         }
-        .frame(maxWidth: maxStripWidth)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -606,6 +599,67 @@ struct ToolbarLineWidthStepperPanel: View {
         }
         .padding(16)
         .frame(width: 280)
+    }
+}
+
+struct ToolbarBorderWidthColorPanel: View {
+    @Binding var width: CGFloat
+    @Binding var color: Color
+    let style: LineWidthInputStyle
+    let step: CGFloat
+    let max: CGFloat
+    var title: String = "Border"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            if style == .presetButtons {
+                VStack(alignment: .leading, spacing: 8) {
+                    borderWidthPresetButton(label: "None", width: 0)
+                    borderWidthPresetButton(label: "Thin (1pt)", width: 1)
+                    borderWidthPresetButton(label: "Medium (2pt)", width: 2)
+                    borderWidthPresetButton(label: "Thick (4pt)", width: 4)
+                    borderWidthPresetButton(label: "Heavy (6pt)", width: 6)
+                }
+            } else {
+                LineWidthStepperControl(value: $width, step: step, max: max, allowsZero: true)
+            }
+
+            Divider()
+
+            HStack {
+                Label("Border color", systemImage: "square.dashed")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                Spacer()
+                ColorPicker("", selection: $color)
+                    .labelsHidden()
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+    }
+
+    private func borderWidthPresetButton(label: String, width presetWidth: CGFloat) -> some View {
+        Button {
+            width = presetWidth
+        } label: {
+            HStack {
+                Text(label)
+                Spacer()
+                if abs(width - presetWidth) < 0.001 {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
     }
 }
 

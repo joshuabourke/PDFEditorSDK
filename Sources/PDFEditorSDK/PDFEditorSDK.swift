@@ -40,12 +40,18 @@ public typealias PDFEditorFileHandler = (PDFEditorFileRequest) throws -> URL
 public struct PDFEditorView: View {
     @State private var viewModel: PDFFormViewModel
     private let showsDismissButton: Bool
+    private let showsHighlightButton: Bool
+    private let showsLockButton: Bool
+    private let showsPencilButton: Bool
 
     /// - Parameters:
     ///   - url: The PDF document to open.
     ///   - showsDismissButton: Whether to show a leading Close button in the navigation bar.
     ///   - onSaveEditable: Called when the user saves the editable PDF.
     ///   - onExportFlattened: Called when the user exports a flattened PDF.
+    ///   - showsHighlightButton: Whether to show the selected-text highlight button.
+    ///   - showsLockButton: Whether to show the page scroll lock button.
+    ///   - showsPencilButton: Whether to show the PencilKit button.
     ///   - shouldHighlightFormField: Return `true` to show the blue highlight overlay for a field,
     ///     `false` to hide it. When `nil` (default), fields are highlighted unless they are
     ///     read-only (`isReadOnly`) or annotation-locked (`isAnnotationLocked`).
@@ -54,6 +60,9 @@ public struct PDFEditorView: View {
         showsDismissButton: Bool = false,
         onSaveEditable: PDFEditorFileHandler? = nil,
         onExportFlattened: PDFEditorFileHandler? = nil,
+        showsHighlightButton: Bool = true,
+        showsLockButton: Bool = true,
+        showsPencilButton: Bool = true,
         shouldHighlightFormField: ((PDFFormFieldInfo) -> Bool)? = nil
     ) {
         _viewModel = State(
@@ -65,12 +74,18 @@ public struct PDFEditorView: View {
             )
         )
         self.showsDismissButton = showsDismissButton
+        self.showsHighlightButton = showsHighlightButton
+        self.showsLockButton = showsLockButton
+        self.showsPencilButton = showsPencilButton
     }
 
     public var body: some View {
         PDFFormEditorView(
             viewModel: viewModel,
-            showsDismissButton: showsDismissButton
+            showsDismissButton: showsDismissButton,
+            showsHighlightButton: showsHighlightButton,
+            showsLockButton: showsLockButton,
+            showsPencilButton: showsPencilButton
         )
     }
 }

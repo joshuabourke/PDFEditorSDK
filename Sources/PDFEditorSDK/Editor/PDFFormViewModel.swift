@@ -95,6 +95,9 @@ class PDFFormViewModel {
     var isThumbnailOverlayVisible: Bool {
         didSet { preferences.isThumbnailOverlayVisible = isThumbnailOverlayVisible; preferences.save() }
     }
+    var toolbarCompact: Bool {
+        didSet { preferences.toolbarCompact = toolbarCompact; preferences.save() }
+    }
     var lineWidthInputStyle: LineWidthInputStyle {
         didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
     }
@@ -185,6 +188,7 @@ class PDFFormViewModel {
         self.pencilSqueezeAction = prefs.pencilSqueezeAction
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
         self.isThumbnailOverlayVisible = prefs.isThumbnailOverlayVisible
+        self.toolbarCompact = prefs.toolbarCompact
 
         self.lineWidthInputStyle = prefs.lineWidthInputStyle
         self.lineWidthStep = prefs.lineWidthStep
@@ -263,7 +267,7 @@ class PDFFormViewModel {
     }
 
     func applyShapeStyleToSelected() {
-        pdfView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
+        pdfView?.applyShapeStyleToSelected(kind: activeShapeKind, strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
     }
 
     func applyImageBorderToSelected() {
@@ -435,6 +439,7 @@ class PDFFormViewModel {
     }
     
     func undo() {
+        prepareForFormUndoRedo()
         guard let action = undoStack.popLast() else { return }
         let resolved = resolveOverlayStateIfNeeded(action)
         redoStack.append(resolved)
@@ -442,11 +447,19 @@ class PDFFormViewModel {
     }
     
     func redo() {
-            guard let action = redoStack.popLast() else { return }
-            undoStack.append(action)
-            
-            performRedoAction(action)
-        }
+        prepareForFormUndoRedo()
+        guard let action = redoStack.popLast() else { return }
+        undoStack.append(action)
+        
+        performRedoAction(action)
+    }
+
+    private func prepareForFormUndoRedo() {
+        guard let pdfView else { return }
+        pdfView.commitActiveFormWidgetTextToAnnotations()
+        pdfView.flushPendingFormFieldUndoTracking()
+        pdfView.endEditing(true)
+    }
 
     private func resolveOverlayStateIfNeeded(_ action: UndoAction) -> UndoAction {
         switch action {
@@ -480,7 +493,7 @@ class PDFFormViewModel {
             case .annotation(let ann):
                 ann.page?.removeAnnotation(ann)
             case .formFieldChange(let ann, let prev, _):
-                ann.widgetStringValue = prev
+                applyFormFieldValue(annotation: ann, value: prev)
             case .drawingSession(let page, let old, let new):
                 if let sel = pdfView?.selectedInkAnnotation, new.contains(where: { $0 === sel }) {
                     pdfView?.deselectInkAnnotation()
@@ -538,7 +551,7 @@ class PDFFormViewModel {
             case .annotation(let ann):
                 ann.page?.addAnnotation(ann)
             case .formFieldChange(let ann, _, let newValue):
-                ann.widgetStringValue = newValue
+                applyFormFieldValue(annotation: ann, value: newValue)
             case .drawingSession(let page, let old, let new):
                 old.forEach { page.removeAnnotation($0) }
                 new.forEach { page.addAnnotation($0) }
@@ -591,6 +604,17 @@ class PDFFormViewModel {
                 goToPage(index: max(0, at - 1))
             }
         }
+
+    private func applyFormFieldValue(annotation: PDFAnnotation, value: String?) {
+        pdfView?.beginApplyingFormUndoRedo()
+        defer { pdfView?.endApplyingFormUndoRedo() }
+        annotation.widgetStringValue = value
+        annotation.setValue(value as Any, forAnnotationKey: .widgetValue)
+        pdfView?.syncFormFieldBaseline(for: annotation)
+        pdfView?.refreshFormWidgetAppearance(for: annotation)
+        pdfView?.refreshAllFormWidgetAppearances()
+        pdfView?.scheduleFullFormWidgetAppearanceRefresh()
+    }
     
     
     // Call this whenever a fresh change is made to clear the redo stack
@@ -667,6 +691,21 @@ class PDFFormViewModel {
             exportStatus = "No overlays to export"
             return nil
         }
+
+        // Copy any in-progress PDF widget text into annotations while the hosted
+        // control still reflects the keyboard; PDFKit may not update widgetStringValue
+        // synchronously when we only call endEditing.
+        pdfView?.commitActiveFormWidgetTextToAnnotations()
+        // Share can begin before keyboard notifications run; flush undo tracking now
+        // so the latest field edit is always represented in undo/redo history.
+        pdfView?.flushPendingFormFieldUndoTracking()
+        // Resign any active text editor (native PDF form field or overlay text box)
+        // so PDFKit commits the in-progress value and regenerates the annotation
+        // appearance stream before we render. Without this, the field appears blank
+        // on the first share and only shows on subsequent shares (after the share
+        // sheet presentation naturally steals focus and causes a commit).
+        pdfView?.endEditing(true)
+
         guard let metadata = pdfView?.overlayMetadataSnapshot() else {
             exportStatus = "No overlays to export"
             return nil
@@ -728,7 +767,17 @@ class PDFFormViewModel {
                     cg.scaleBy(x: 1, y: -1)
                     
                     page.draw(with: .mediaBox, to: cg)
-                    
+                    // PDF drawing can leave the text matrix non-identity; saveGState does not
+                    // preserve it, and CTFrameDraw updates it — reset before overlay text draws.
+                    cg.textMatrix = .identity
+
+                    // Overlay current form-field values directly from widgetStringValue.
+                    // This bypasses PDFKit's lazy appearance-stream generation, which is
+                    // only triggered when a field editor resigns — meaning a field that is
+                    // still active (or was active) at share time would otherwise appear
+                    // blank or show a stale value from a previous edit session.
+                    renderFormFieldOverlay(for: page, in: cg)
+
                     let textItems = metadata.textBoxes.filter { $0.pageIndex == pageIndex }
                     for item in textItems {
                         let rect = item.rect.cgRect
@@ -828,6 +877,52 @@ class PDFFormViewModel {
         }
     }
     
+    /// Draws the live `widgetStringValue` of every text and choice form field on
+    /// `page` directly into `context`, bypassing PDFKit's appearance stream.
+    ///
+    /// PDFKit only regenerates a field's appearance stream when its editor resigns
+    /// first responder. If the user taps Share while a field is still active, the
+    /// appearance stream rendered by `page.draw()` is stale or empty. This method
+    /// reads the always-current `widgetStringValue` and draws it on top, filling
+    /// the field interior first so any stale appearance-stream content is erased.
+    private func renderFormFieldOverlay(for page: PDFPage, in context: CGContext) {
+        for annotation in page.annotations {
+            // Only process text-input and choice (dropdown) fields.
+            let fieldType = annotation.widgetFieldType
+            guard fieldType == .text || fieldType == .choice else { continue }
+            guard let text = annotation.widgetStringValue, !text.isEmpty else { continue }
+
+            let bounds = annotation.bounds
+            guard bounds.width > 1, bounds.height > 1 else { continue }
+
+            // Erase any stale rendered content inside the field boundary.
+            // Inset by 1 pt so the field's own border (drawn by page.draw()) is kept.
+            context.saveGState()
+            context.setFillColor(UIColor.white.cgColor)
+            context.fill(bounds.insetBy(dx: 1, dy: 1))
+            context.restoreGState()
+
+            // Read styling from the annotation; fall back to sensible defaults.
+            let font     = annotation.font ?? UIFont.systemFont(ofSize: 12)
+            let isBold   = font.fontDescriptor.symbolicTraits.contains(.traitBold)
+            let color    = annotation.fontColor ?? UIColor.black
+            let align    = annotation.alignment
+
+            // Use the same 4 pt inset PDFKit applies to its own field editor.
+            let padding  = UIEdgeInsets(top: 2, left: 4, bottom: 2, right: 4)
+            drawText(
+                text,
+                in: bounds.inset(by: padding),
+                fontSize: font.pointSize,
+                isBold: isBold,
+                textColor: color,
+                textAlignment: align,
+                verticalAlignment: .middle,
+                context: context
+            )
+        }
+    }
+
     private func drawText(_ text: String, in rect: CGRect, fontSize: CGFloat, isBold: Bool, textColor: UIColor, textAlignment: NSTextAlignment = .left, verticalAlignment: TextVerticalAlignment = .top, context: CGContext) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = textAlignment
@@ -859,9 +954,11 @@ class PDFFormViewModel {
         }
 
         context.saveGState()
+        context.textMatrix = .identity
         let path = CGPath(rect: drawRect, transform: nil)
         let frame = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, attributed.length), path, nil)
         CTFrameDraw(frame, context)
+        context.textMatrix = .identity
         context.restoreGState()
     }
 

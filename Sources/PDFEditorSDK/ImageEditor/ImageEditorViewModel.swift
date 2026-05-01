@@ -53,6 +53,7 @@ class ImageEditorViewModel {
     var textBoxBorderColor: UIColor {
         didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); preferences.save() }
     }
+    var selectedTextBoxAutoResize: Bool = false
     var selectedTextBoxBorderWidth: CGFloat = 0
     var selectedTextBoxBorderColor: UIColor = .black
     var activeShapeKind: OverlayShapeKind {
@@ -84,6 +85,9 @@ class ImageEditorViewModel {
     }
     var pencilDoubleSqueezeAction: PencilGestureAction {
         didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+    }
+    var toolbarCompact: Bool {
+        didSet { preferences.toolbarCompact = toolbarCompact; preferences.save() }
     }
     var lineWidthInputStyle: LineWidthInputStyle {
         didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
@@ -171,6 +175,7 @@ class ImageEditorViewModel {
         self.pencilDoubleTapAction     = prefs.pencilDoubleTapAction
         self.pencilSqueezeAction       = prefs.pencilSqueezeAction
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
+        self.toolbarCompact = prefs.toolbarCompact
 
         self.lineWidthInputStyle = prefs.lineWidthInputStyle
         self.lineWidthStep = prefs.lineWidthStep
@@ -210,7 +215,7 @@ class ImageEditorViewModel {
     }
 
     func applyShapeStyleToSelected() {
-        canvasView?.applyShapeStyleToSelected(strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
+        canvasView?.applyShapeStyleToSelected(kind: activeShapeKind, strokeColor: shapeStrokeColor, lineWidth: shapeLineWidth)
     }
 
     func applyImageBorderToSelected() {
@@ -229,6 +234,15 @@ class ImageEditorViewModel {
     func commitSelectedTextBoxBorderColor(_ color: UIColor) {
         selectedTextBoxBorderColor = color
         applyTextBorderToSelected()
+    }
+
+    func toggleSelectedTextBoxAutoResize() {
+        selectedTextBoxAutoResize.toggle()
+        applyAutoResizeToSelectedTextBox()
+    }
+
+    func applyAutoResizeToSelectedTextBox() {
+        canvasView?.setSelectedTextBoxAutoResize(selectedTextBoxAutoResize)
     }
 
     func commitImageBorderWidth(_ width: CGFloat) {

@@ -64,6 +64,9 @@ struct EditorPreferences: Codable {
     // Thumbnail
     var isThumbnailOverlayVisible: Bool = true
 
+    // Toolbar
+    var toolbarCompact: Bool = false
+
     /// Global UI for draw/shape stroke and image/text border widths.
     var lineWidthInputStyle: LineWidthInputStyle = .presetButtons
     /// Step size in points when using stepper mode (clamped when saving).
@@ -83,6 +86,7 @@ struct EditorPreferences: Codable {
         case imageBorderWidth, imageBorderColor
         case textBoxBorderWidth, textBoxBorderColor
         case isThumbnailOverlayVisible
+        case toolbarCompact
         case lineWidthInputStyle, lineWidthStep, lineWidthMax
     }
 
@@ -119,6 +123,7 @@ struct EditorPreferences: Codable {
         textBoxBorderColor = try c.decodeIfPresent(RGBAColor.self, forKey: .textBoxBorderColor)
             ?? RGBAColor(r: 0, g: 0, b: 0, a: 1)
         isThumbnailOverlayVisible = try c.decodeIfPresent(Bool.self, forKey: .isThumbnailOverlayVisible) ?? true
+        toolbarCompact = try c.decodeIfPresent(Bool.self, forKey: .toolbarCompact) ?? false
         lineWidthInputStyle = try c.decodeIfPresent(LineWidthInputStyle.self, forKey: .lineWidthInputStyle) ?? .presetButtons
         lineWidthStep = Self.decodeCGFloat(c, forKey: .lineWidthStep, default: 0.5)
         lineWidthMax = Self.decodeCGFloat(c, forKey: .lineWidthMax, default: 24)
@@ -152,6 +157,7 @@ struct EditorPreferences: Codable {
         try c.encode(Double(prefs.textBoxBorderWidth), forKey: .textBoxBorderWidth)
         try c.encode(prefs.textBoxBorderColor, forKey: .textBoxBorderColor)
         try c.encode(prefs.isThumbnailOverlayVisible, forKey: .isThumbnailOverlayVisible)
+        try c.encode(prefs.toolbarCompact, forKey: .toolbarCompact)
         try c.encode(prefs.lineWidthInputStyle, forKey: .lineWidthInputStyle)
         try c.encode(Double(prefs.lineWidthStep), forKey: .lineWidthStep)
         try c.encode(Double(prefs.lineWidthMax), forKey: .lineWidthMax)
