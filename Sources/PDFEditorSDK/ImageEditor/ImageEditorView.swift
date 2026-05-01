@@ -1929,9 +1929,39 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
     }
 
+    /// Creates a minimal auto-expanding text box at a tap point, capped by the
+    /// right edge of the image content area — mirrors `createTapTextBox` in the PDF editor.
+    private func createTapTextBox(at point: CGPoint) {
+        // point is in overlayView coords, which equals self coords (overlayView.frame == bounds).
+        let maxWidth = max(80, imageContentRect.maxX - point.x)
+        let lineHeight = textBoxFontSize + 12   // 6 pt top + 6 pt bottom padding
+        let initialFrame = CGRect(
+            x: point.x,
+            y: point.y,
+            width: 40,
+            height: max(30, lineHeight)
+        )
+        let state = OverlayTextBoxState(
+            id: UUID(),
+            frame: initialFrame,
+            text: "",
+            backgroundColor: textBoxBackgroundColor,
+            fontSize: textBoxFontSize,
+            isBold: textBoxIsBold,
+            textColor: textBoxTextColor,
+            textAlignment: textBoxTextAlignment,
+            verticalAlignment: textBoxVerticalAlignment,
+            autoResizeEnabled: textBoxAutoResize,
+            borderWidth: textBoxBorderWidth,
+            borderColor: textBoxBorderColor
+        )
+        addTextBox(from: state, beginEditing: true, tapCreateMaxWidth: maxWidth)
+        viewModel?.didMakeChange(.textBox(add: state, remove: nil))
+    }
+
     // MARK: - Overlay Text Box Methods
 
-    func addTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false) {
+    func addTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false, tapCreateMaxWidth: CGFloat? = nil) {
         let box = TextBoxView(id: state.id)
         box.frame = state.frame
         box.setText(state.text)
@@ -1941,6 +1971,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
         box.setAutoResize(state.autoResizeEnabled)
+        if let maxWidth = tapCreateMaxWidth {
+            box.setTapCreateAutoResize(enabled: true, maxWidth: maxWidth)
+        }
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
@@ -2155,10 +2188,16 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         if isSelectMode {
             endTextEditing()
             deselectAll()
-        } else if isTextMode
-            || selectedTextBoxID != nil
-            || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder })
-        {
+        } else if isTextMode {
+            if selectedTextBoxID != nil || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder }) {
+                // A text box is active — outside tap dismisses it.
+                endTextEditing()
+                deselectAll()
+            } else {
+                // Nothing active — single tap creates an auto-sizing text box at the tap point.
+                createTapTextBox(at: point)
+            }
+        } else if selectedTextBoxID != nil || textBoxViews.values.contains(where: { $0.isTextInputFirstResponder }) {
             endTextEditing()
             deselectAll()
         }
