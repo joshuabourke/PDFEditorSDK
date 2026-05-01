@@ -123,6 +123,7 @@ class ImageEditorViewModel {
     var hasSelectedOverlayObject: Bool = false
     var showImageSourceDialog: Bool = false
     var saveStatus: String?
+    var hasUnsavedChanges: Bool = false
     var undoStack: [ImageUndoAction] = []
     var redoStack: [ImageUndoAction] = []
     weak var canvasView: DrawingImageView?
@@ -283,6 +284,7 @@ class ImageEditorViewModel {
         if let onSave {
             onSave(image)
             saveStatus = "Image saved"
+            hasUnsavedChanges = false
             return
         }
 
@@ -301,6 +303,7 @@ class ImageEditorViewModel {
             let destination = folder.appendingPathComponent(fileName)
             try data.write(to: destination)
             saveStatus = "Saved to: \(fileName)"
+            hasUnsavedChanges = false
         } catch {
             saveStatus = "Failed to save image"
         }
@@ -320,6 +323,7 @@ class ImageEditorViewModel {
             undoStack.removeFirst(undoStack.count - maxUndoActions)
         }
         redoStack.removeAll()
+        hasUnsavedChanges = true
     }
 
     func undo() {

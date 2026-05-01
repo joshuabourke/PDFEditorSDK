@@ -114,11 +114,12 @@ struct ImageFormEditorView: View {
         .ignoresSafeArea(.keyboard)
         .navigationTitle("Image Editor")
         .navigationBarTitleDisplayMode(.inline)
+        .interactiveDismissDisabled(viewModel.hasUnsavedChanges)
         .toolbar {
-            if showsDismissButton {
+            if showsDismissButton || viewModel.hasUnsavedChanges {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        if !viewModel.undoStack.isEmpty {
+                        if viewModel.hasUnsavedChanges {
                             changesNotSaved.toggle()
                         } else {
                             dismiss()
