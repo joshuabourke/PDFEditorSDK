@@ -15,7 +15,12 @@ import CoreText
 @Observable
 class PDFFormViewModel {
     private var preferences: EditorPreferences
-    
+    private let preferencesScope: EditorPreferencesScope = .pdf
+
+    private func persistPreferences() {
+        preferences.save(scope: preferencesScope)
+    }
+
     var pdfDocument: PDFDocument?
     var activeTool: EditorTool = .form
     var undoStack: [UndoAction] = []
@@ -26,80 +31,90 @@ class PDFFormViewModel {
     var hasSelectedOverlayObject: Bool = false
     weak var pdfView: DrawingPDFView?
     var inkColor: UIColor {
-        didSet { preferences.inkColor = RGBAColor(inkColor); preferences.save()}
+        didSet { preferences.inkColor = RGBAColor(inkColor); persistPreferences()}
     }
     var inkLineWidth: CGFloat {
-        didSet { preferences.inkLineWidth = inkLineWidth; preferences.save()}
+        didSet { preferences.inkLineWidth = inkLineWidth; persistPreferences()}
     }
     var eraserRadius: CGFloat {
-        didSet { preferences.eraserRadius = eraserRadius; preferences.save()}
+        didSet { preferences.eraserRadius = eraserRadius; persistPreferences()}
     }
     var textBoxBackgroundColor: UIColor {
-        didSet { preferences.textBoxBackgroundColor = RGBAColor(textBoxBackgroundColor); preferences.save()}
+        didSet { preferences.textBoxBackgroundColor = RGBAColor(textBoxBackgroundColor); persistPreferences()}
     }
     var textBoxFontSize: CGFloat {
-        didSet { preferences.textBoxFontSize = textBoxFontSize; preferences.save()}
+        didSet {
+            if textBoxFontSize < 1 {
+                textBoxFontSize = 1
+                return
+            }
+            preferences.textBoxFontSize = textBoxFontSize
+            persistPreferences()
+        }
     }
     var textBoxIsBold: Bool {
-        didSet { preferences.textBoxIsBold = textBoxIsBold; preferences.save()}
+        didSet { preferences.textBoxIsBold = textBoxIsBold; persistPreferences()}
     }
     var textBoxTextColor: UIColor {
-        didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); preferences.save()}
+        didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); persistPreferences()}
     }
     var textBoxTextAlignment: NSTextAlignment {
-        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; preferences.save()}
+        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; persistPreferences()}
     }
     var textBoxVerticalAlignment: TextVerticalAlignment {
-        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
+        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; persistPreferences()}
     }
     var textBoxBorderWidth: CGFloat {
-        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; preferences.save() }
+        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; persistPreferences() }
     }
     var textBoxBorderColor: UIColor {
-        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); preferences.save() }
+        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); persistPreferences() }
     }
     /// Reflects the border state of the currently selected text box (not persisted — synced on selection).
     var selectedTextBoxBorderWidth: CGFloat = 0
     var selectedTextBoxBorderColor: UIColor = .black
     var activeShapeKind: OverlayShapeKind {
-        didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
+        didSet { preferences.activeShapeKind = activeShapeKind; persistPreferences()}
     }
     var shapeStrokeColor: UIColor {
-        didSet { preferences.shapeStrokeColor = RGBAColor(shapeStrokeColor); preferences.save()}
+        didSet { preferences.shapeStrokeColor = RGBAColor(shapeStrokeColor); persistPreferences()}
     }
     var shapeLineWidth: CGFloat {
-        didSet { preferences.shapeLineWidth = shapeLineWidth; preferences.save()}
+        didSet { preferences.shapeLineWidth = shapeLineWidth; persistPreferences()}
     }
     var imageBorderWidth: CGFloat {
-        didSet { preferences.imageBorderWidth = imageBorderWidth; preferences.save()}
+        didSet { preferences.imageBorderWidth = imageBorderWidth; persistPreferences()}
     }
     var imageBorderColor: UIColor {
-        didSet { preferences.imageBorderColor = RGBAColor(imageBorderColor); preferences.save()}
+        didSet { preferences.imageBorderColor = RGBAColor(imageBorderColor); persistPreferences()}
     }
     var drawWithFinger: Bool {
-        didSet { preferences.drawWithFinger = drawWithFinger; preferences.save() }
+        didSet { preferences.drawWithFinger = drawWithFinger; persistPreferences() }
     }
     var pencilOnlyAnnotations: Bool {
-        didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; preferences.save() }
+        didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; persistPreferences() }
     }
     var pencilDoubleTapAction: PencilGestureAction {
-        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; preferences.save() }
+        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; persistPreferences() }
     }
     var pencilSqueezeAction: PencilGestureAction {
-        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; preferences.save() }
+        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; persistPreferences() }
     }
     var pencilDoubleSqueezeAction: PencilGestureAction {
-        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; persistPreferences() }
     }
     var previousTool: EditorTool? = nil
     var isThumbnailOverlayVisible: Bool {
-        didSet { preferences.isThumbnailOverlayVisible = isThumbnailOverlayVisible; preferences.save() }
+        didSet { preferences.isThumbnailOverlayVisible = isThumbnailOverlayVisible; persistPreferences() }
     }
     var toolbarCompact: Bool {
-        didSet { preferences.toolbarCompact = toolbarCompact; preferences.save() }
+        didSet { preferences.toolbarCompact = toolbarCompact; persistPreferences() }
+    }
+    var toolOptionsPresentation: ToolOptionsPresentation {
+        didSet { preferences.toolOptionsPresentation = toolOptionsPresentation; persistPreferences() }
     }
     var lineWidthInputStyle: LineWidthInputStyle {
-        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
+        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; persistPreferences() }
     }
     var lineWidthStep: CGFloat {
         didSet {
@@ -111,7 +126,7 @@ class PDFFormViewModel {
                 return
             }
             preferences.lineWidthStep = p.lineWidthStep
-            preferences.save()
+            persistPreferences()
         }
     }
     var lineWidthMax: CGFloat {
@@ -124,7 +139,7 @@ class PDFFormViewModel {
                 return
             }
             preferences.lineWidthMax = p.lineWidthMax
-            preferences.save()
+            persistPreferences()
         }
     }
     var saveStatus: String?
@@ -157,7 +172,7 @@ class PDFFormViewModel {
         self.flattenedExportHandler = flattenedExportHandler
         self.shouldHighlightFormField = shouldHighlightFormField
         
-        let prefs = EditorPreferences.load()
+        let prefs = EditorPreferences.load(scope: preferencesScope)
         self.preferences = prefs
         
         self.inkColor = prefs.inkColor.uiColor
@@ -166,12 +181,11 @@ class PDFFormViewModel {
         self.eraserRadius = prefs.eraserRadius
         
         self.textBoxBackgroundColor = prefs.textBoxBackgroundColor.uiColor
-        self.textBoxFontSize = prefs.textBoxFontSize
+        self.textBoxFontSize = max(1, prefs.textBoxFontSize)
         self.textBoxIsBold = prefs.textBoxIsBold
         self.textBoxTextColor = prefs.textBoxTextColor.uiColor
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
-        self.textBoxAutoResize = prefs.textBoxAutoResize
         self.textBoxBorderWidth = prefs.textBoxBorderWidth
         self.textBoxBorderColor = prefs.textBoxBorderColor.uiColor
 
@@ -189,6 +203,7 @@ class PDFFormViewModel {
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
         self.isThumbnailOverlayVisible = prefs.isThumbnailOverlayVisible
         self.toolbarCompact = prefs.toolbarCompact
+        self.toolOptionsPresentation = prefs.toolOptionsPresentation
 
         self.lineWidthInputStyle = prefs.lineWidthInputStyle
         self.lineWidthStep = prefs.lineWidthStep
@@ -199,12 +214,6 @@ class PDFFormViewModel {
     }
     
     var selectedOverlayKind: SelectedOverlayKind?
-    /// Persisted default applied to every newly drawn text box.
-    var textBoxAutoResize: Bool {
-        didSet { preferences.textBoxAutoResize = textBoxAutoResize; preferences.save() }
-    }
-    /// Reflects the auto-resize state of the currently selected text box (not persisted).
-    var selectedTextBoxAutoResize: Bool = false
 
     var isDrawingMode: Bool { activeTool == .draw }
     var isEraserMode: Bool { activeTool == .erase }
@@ -290,11 +299,6 @@ class PDFFormViewModel {
         applyTextBorderToSelected()
     }
 
-    func toggleSelectedTextBoxAutoResize() {
-        selectedTextBoxAutoResize.toggle()
-        applyAutoResizeToSelectedTextBox()
-    }
-
     func commitImageBorderWidth(_ width: CGFloat) {
         imageBorderWidth = width
         applyImageBorderToSelected()
@@ -377,10 +381,6 @@ class PDFFormViewModel {
         )
     }
 
-    func applyAutoResizeToSelectedTextBox() {
-        pdfView?.setSelectedTextBoxAutoResize(selectedTextBoxAutoResize)
-    }
-    
     func updatePageMetrics() {
         pageCount = pdfDocument?.pageCount ?? 0
         if let page = pdfView?.currentPage, let document = pdfDocument {
@@ -863,6 +863,32 @@ class PDFFormViewModel {
                             cg.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY))
                             cg.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY))
                             cg.closePath()
+                        case .line:
+                            let points = overlayLineEndpoints(
+                                in: rect,
+                                kind: kind,
+                                lineWidth: item.lineWidth,
+                                flippedH: item.lineFlippedH ?? false,
+                                flippedV: item.lineFlippedV ?? false
+                            )
+                            cg.move(to: points.start)
+                            cg.addLine(to: points.end)
+                        case .arrow:
+                            let points = overlayLineEndpoints(
+                                in: rect,
+                                kind: kind,
+                                lineWidth: item.lineWidth,
+                                flippedH: item.lineFlippedH ?? false,
+                                flippedV: item.lineFlippedV ?? false
+                            )
+                            cg.move(to: points.start)
+                            cg.addLine(to: points.end)
+                            addArrowhead(
+                                from: points.start,
+                                to: points.end,
+                                lineWidth: item.lineWidth,
+                                context: cg
+                            )
                         }
                         cg.strokePath()
                         cg.restoreGState()
@@ -972,6 +998,49 @@ class PDFFormViewModel {
             y: rect.midY - size.height / 2
         )
         return CGRect(origin: origin, size: size)
+    }
+
+    private func overlayLineEndpoints(
+        in rect: CGRect,
+        kind: OverlayShapeKind,
+        lineWidth: CGFloat,
+        flippedH: Bool,
+        flippedV: Bool
+    ) -> (start: CGPoint, end: CGPoint) {
+        let inset = ShapeBoxView.lineDrawingInset(for: kind, lineWidth: lineWidth)
+        let drawableRect = rect.insetBy(dx: min(inset, rect.width / 2), dy: min(inset, rect.height / 2))
+        let start = CGPoint(
+            x: flippedH ? drawableRect.maxX : drawableRect.minX,
+            y: flippedV ? drawableRect.maxY : drawableRect.minY
+        )
+        let end = CGPoint(
+            x: flippedH ? drawableRect.minX : drawableRect.maxX,
+            y: flippedV ? drawableRect.minY : drawableRect.maxY
+        )
+        return (start, end)
+    }
+
+    private func addArrowhead(from start: CGPoint, to end: CGPoint, lineWidth: CGFloat, context: CGContext) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 1 else { return }
+
+        let angle = atan2(dy, dx)
+        let headLength = max(lineWidth * 5, 18)
+        let headAngle: CGFloat = .pi / 6
+        let firstPoint = CGPoint(
+            x: end.x - headLength * cos(angle - headAngle),
+            y: end.y - headLength * sin(angle - headAngle)
+        )
+        let secondPoint = CGPoint(
+            x: end.x - headLength * cos(angle + headAngle),
+            y: end.y - headLength * sin(angle + headAngle)
+        )
+
+        context.move(to: firstPoint)
+        context.addLine(to: end)
+        context.addLine(to: secondPoint)
     }
 
     /// Sets /NeedAppearances to false in the saved PDF so Windows viewers (Adobe, Chrome)

@@ -7,6 +7,23 @@
 
 import Foundation
 
+/// How draw / erase / text / shape tool options are shown from the main toolbar.
+enum ToolOptionsPresentation: String, Codable, CaseIterable, Identifiable {
+    /// Long-press a tool button to open the options popover (default).
+    case longPressPopover
+    /// Tap the tool once to activate; tap again to show or hide the same compact sub-toolbar used in Select mode.
+    case subToolbar
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .longPressPopover: return "Long-press panel"
+        case .subToolbar: return "Sub-toolbar"
+        }
+    }
+}
+
 /// How line and border thickness is adjusted in tool panels and compact toolbars.
 enum LineWidthInputStyle: String, Codable, CaseIterable, Identifiable {
     case presetButtons
@@ -20,6 +37,12 @@ enum LineWidthInputStyle: String, Codable, CaseIterable, Identifiable {
         case .stepper: return "Stepper"
         }
     }
+}
+
+/// Which editor surface persists preferences (PDF vs image).
+enum EditorPreferencesScope: String, CaseIterable {
+    case pdf
+    case image
 }
 
 struct EditorPreferences: Codable {
@@ -46,7 +69,6 @@ struct EditorPreferences: Codable {
     var textBoxBackgroundColor: RGBAColor = RGBAColor(r: 1, g: 0.91, b: 0.25, a: 1)// System Yellow
     var textBoxTextAlignment: Int = 0              // NSTextAlignment.left.rawValue
     var textBoxVerticalAlignment: String = "top"   // TextVerticalAlignment.rawValue
-    var textBoxAutoResize: Bool = false
 
     //Shape
     var activeShapeKind: OverlayShapeKind = .rectangle
@@ -66,6 +88,8 @@ struct EditorPreferences: Codable {
 
     // Toolbar
     var toolbarCompact: Bool = false
+    /// Tool option panels: long-press popover vs tap-to-toggle sub-toolbar row.
+    var toolOptionsPresentation: ToolOptionsPresentation = .longPressPopover
 
     /// Global UI for draw/shape stroke and image/text border widths.
     var lineWidthInputStyle: LineWidthInputStyle = .presetButtons
@@ -74,19 +98,29 @@ struct EditorPreferences: Codable {
     /// Upper bound in points for stepper mode (clamped when saving).
     var lineWidthMax: CGFloat = 24
 
-    static let userDefaultsKey = "com.pdfeditor.editorPreferences"
+    /// Pre-scoped storage; migrated once into per-scope keys.
+    private static let legacyUserDefaultsKey = "com.pdfeditor.editorPreferences"
+    private static let legacyMigratedKey = "com.pdfeditor.editorPreferences.legacyMigrated"
+
+    static func userDefaultsKey(for scope: EditorPreferencesScope) -> String {
+        switch scope {
+        case .pdf: return "com.pdfeditor.editorPreferences.pdf"
+        case .image: return "com.pdfeditor.editorPreferences.image"
+        }
+    }
 
     private enum CodingKeys: String, CodingKey {
         case inkColor, inkLineWidth, eraserRadius
         case drawWithFinger, pencilOnlyAnnotations
         case pencilDoubleTapAction, pencilSqueezeAction, pencilDoubleSqueezeAction
         case textBoxFontSize, textBoxIsBold, textBoxTextColor, textBoxBackgroundColor
-        case textBoxTextAlignment, textBoxVerticalAlignment, textBoxAutoResize
+        case textBoxTextAlignment, textBoxVerticalAlignment
         case activeShapeKind, shapeStrokeColor, shapeLineWidth
         case imageBorderWidth, imageBorderColor
         case textBoxBorderWidth, textBoxBorderColor
         case isThumbnailOverlayVisible
         case toolbarCompact
+        case toolOptionsPresentation
         case lineWidthInputStyle, lineWidthStep, lineWidthMax
     }
 
@@ -111,7 +145,6 @@ struct EditorPreferences: Codable {
             ?? RGBAColor(r: 1, g: 0.91, b: 0.25, a: 1)
         textBoxTextAlignment = try c.decodeIfPresent(Int.self, forKey: .textBoxTextAlignment) ?? 0
         textBoxVerticalAlignment = try c.decodeIfPresent(String.self, forKey: .textBoxVerticalAlignment) ?? "top"
-        textBoxAutoResize = try c.decodeIfPresent(Bool.self, forKey: .textBoxAutoResize) ?? false
         activeShapeKind = try c.decodeIfPresent(OverlayShapeKind.self, forKey: .activeShapeKind) ?? .rectangle
         shapeStrokeColor = try c.decodeIfPresent(RGBAColor.self, forKey: .shapeStrokeColor)
             ?? RGBAColor(r: 1, g: 0.23, b: 0.19, a: 1)
@@ -124,6 +157,7 @@ struct EditorPreferences: Codable {
             ?? RGBAColor(r: 0, g: 0, b: 0, a: 1)
         isThumbnailOverlayVisible = try c.decodeIfPresent(Bool.self, forKey: .isThumbnailOverlayVisible) ?? true
         toolbarCompact = try c.decodeIfPresent(Bool.self, forKey: .toolbarCompact) ?? false
+        toolOptionsPresentation = try c.decodeIfPresent(ToolOptionsPresentation.self, forKey: .toolOptionsPresentation) ?? .longPressPopover
         lineWidthInputStyle = try c.decodeIfPresent(LineWidthInputStyle.self, forKey: .lineWidthInputStyle) ?? .presetButtons
         lineWidthStep = Self.decodeCGFloat(c, forKey: .lineWidthStep, default: 0.5)
         lineWidthMax = Self.decodeCGFloat(c, forKey: .lineWidthMax, default: 24)
@@ -148,7 +182,6 @@ struct EditorPreferences: Codable {
         try c.encode(prefs.textBoxBackgroundColor, forKey: .textBoxBackgroundColor)
         try c.encode(prefs.textBoxTextAlignment, forKey: .textBoxTextAlignment)
         try c.encode(prefs.textBoxVerticalAlignment, forKey: .textBoxVerticalAlignment)
-        try c.encode(prefs.textBoxAutoResize, forKey: .textBoxAutoResize)
         try c.encode(prefs.activeShapeKind, forKey: .activeShapeKind)
         try c.encode(prefs.shapeStrokeColor, forKey: .shapeStrokeColor)
         try c.encode(Double(prefs.shapeLineWidth), forKey: .shapeLineWidth)
@@ -158,6 +191,7 @@ struct EditorPreferences: Codable {
         try c.encode(prefs.textBoxBorderColor, forKey: .textBoxBorderColor)
         try c.encode(prefs.isThumbnailOverlayVisible, forKey: .isThumbnailOverlayVisible)
         try c.encode(prefs.toolbarCompact, forKey: .toolbarCompact)
+        try c.encode(prefs.toolOptionsPresentation, forKey: .toolOptionsPresentation)
         try c.encode(prefs.lineWidthInputStyle, forKey: .lineWidthInputStyle)
         try c.encode(Double(prefs.lineWidthStep), forKey: .lineWidthStep)
         try c.encode(Double(prefs.lineWidthMax), forKey: .lineWidthMax)
@@ -177,19 +211,45 @@ struct EditorPreferences: Codable {
         lineWidthMax = maxAllowed.min { abs($0 - lineWidthMax) < abs($1 - lineWidthMax) } ?? 24
     }
 
-    static func load() -> EditorPreferences {
-        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+    private static func migrateLegacyPreferencesIfNeeded() {
+        if UserDefaults.standard.bool(forKey: legacyMigratedKey) { return }
+
+        guard let legacyData = UserDefaults.standard.data(forKey: legacyUserDefaultsKey) else {
+            UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+            return
+        }
+
+        guard let prefs = try? JSONDecoder().decode(EditorPreferences.self, from: legacyData) else {
+            UserDefaults.standard.removeObject(forKey: legacyUserDefaultsKey)
+            UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+            return
+        }
+
+        for scope in EditorPreferencesScope.allCases {
+            let key = userDefaultsKey(for: scope)
+            if UserDefaults.standard.data(forKey: key) == nil {
+                prefs.save(scope: scope)
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: legacyUserDefaultsKey)
+        UserDefaults.standard.set(true, forKey: legacyMigratedKey)
+    }
+
+    static func load(scope: EditorPreferencesScope) -> EditorPreferences {
+        migrateLegacyPreferencesIfNeeded()
+        let key = userDefaultsKey(for: scope)
+        guard let data = UserDefaults.standard.data(forKey: key),
               let prefs = try? JSONDecoder().decode(EditorPreferences.self, from: data) else {
             return EditorPreferences()
         }
         return prefs
     }
 
-    func save() {
+    func save(scope: EditorPreferencesScope) {
         var copy = self
         copy.normalizeLineWidthControlFields()
         guard let data = try? JSONEncoder().encode(copy) else { return }
-        UserDefaults.standard.set(data, forKey: EditorPreferences.userDefaultsKey)
+        UserDefaults.standard.set(data, forKey: Self.userDefaultsKey(for: scope))
     }
 }
 

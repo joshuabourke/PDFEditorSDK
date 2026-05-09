@@ -16,6 +16,7 @@ struct EditorSettingsView: View {
     @Binding var pencilSqueezeAction: PencilGestureAction
     @Binding var pencilDoubleSqueezeAction: PencilGestureAction
     @Binding var toolbarCompact: Bool
+    @Binding var toolOptionsPresentation: ToolOptionsPresentation
     @Binding var lineWidthInputStyle: LineWidthInputStyle
     @Binding var lineWidthStep: CGFloat
     @Binding var lineWidthMax: CGFloat
@@ -44,6 +45,30 @@ struct EditorSettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tool options")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                    Picker("Tool options", selection: $toolOptionsPresentation) {
+                        ForEach(ToolOptionsPresentation.allCases) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    Text(
+                        toolOptionsPresentation == .longPressPopover
+                            ? "Long-press Draw, Erase, Text, or Shape to open settings in a popover."
+                            : "Tap the tool once to start using it; tap again to show or hide a compact options row (like in Select mode). Use the Select tool to leave the tool."
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

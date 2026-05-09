@@ -81,7 +81,6 @@ struct TextToolOptionsView: View {
     @Binding var isBold: Bool
     @Binding var textAlignment: NSTextAlignment
     @Binding var verticalAlignment: TextVerticalAlignment
-    @Binding var autoResize: Bool
     @Binding var borderWidth: CGFloat
     @Binding var borderColor: Color
     var lineWidthInputStyle: LineWidthInputStyle
@@ -123,15 +122,16 @@ struct TextToolOptionsView: View {
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Font Size")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                SegmentedOptionRow(
-                    options: [(12.0, "12pt"), (14.0, "14pt"), (18.0, "18pt"), (22.0, "22pt")],
-                    selected: $fontSize
-                )
-            }
+            LineWidthInputRow(
+                title: "Font Size",
+                value: $fontSize,
+                style: .stepper,
+                step: 1,
+                max: 144,
+                allowsZero: false,
+                fieldLabel: "Font size",
+                presetOptions: []
+            )
             .toolOptionRow()
 
             Divider()
@@ -219,15 +219,6 @@ struct TextToolOptionsView: View {
 
             Divider()
 
-            Toggle(isOn: $autoResize) {
-                Label("Auto Size to Text", systemImage: "arrow.up.and.down")
-                    .font(.caption)
-                    .fontWeight(.medium)
-            }
-            .toolOptionRow()
-
-            Divider()
-
             HStack {
                 Label("Border Color", systemImage: "square.dashed")
                     .font(.caption)
@@ -273,10 +264,20 @@ struct ShapeToolOptionsView: View {
                 Text("Shape")
                     .font(.caption)
                     .fontWeight(.semibold)
-                HStack(spacing: 8) {
-                    ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
-                        ShapeKindButton(kind: kind, isSelected: shapeKind == kind) {
-                            shapeKind = kind
+                VStack(spacing: 6) {
+                    HStack(spacing: 8) {
+                        ForEach([OverlayShapeKind.circle, .rectangle, .triangle], id: \.self) { kind in
+                            ShapeKindButton(kind: kind, isSelected: shapeKind == kind) {
+                                shapeKind = kind
+                            }
+                        }
+                        
+                    }
+                    HStack(spacing: 8) {
+                        ForEach([OverlayShapeKind.line, .arrow], id: \.self) { kind in
+                            ShapeKindButton(kind: kind, isSelected: shapeKind == kind) {
+                                shapeKind = kind
+                            }
                         }
                     }
                 }
@@ -436,11 +437,12 @@ private struct LineWidthStepperControl: View {
     let step: CGFloat
     let max: CGFloat
     let allowsZero: Bool
+    var fieldLabel: String = "Width"
 
     @State private var editingText = ""
     @FocusState private var isFieldFocused: Bool
 
-    private var minWidth: CGFloat { allowsZero ? 0 : 0.25 }
+    private var minValue: CGFloat { allowsZero ? 0 : Swift.max(step, 0.25) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -472,22 +474,22 @@ private struct LineWidthStepperControl: View {
                 value: Binding(
                     get: { Double(value) },
                     set: { newVal in
-                        value = LineWidthFormatting.snap(CGFloat(newVal), step: step, min: minWidth, max: max)
+                        value = LineWidthFormatting.snap(CGFloat(newVal), step: step, min: minValue, max: max)
                         syncTextFromValue()
                     }
                 ),
-                in: Double(minWidth)...Double(max),
+                in: Double(minValue)...Double(max),
                 step: Double(step)
             ) {
                 HStack(spacing: 8) {
-                    TextField("Width", text: $editingText)
+                    TextField(fieldLabel, text: $editingText)
                         .keyboardType(.decimalPad)
                         .focused($isFieldFocused)
                         .multilineTextAlignment(.trailing)
                         .font(.body.monospacedDigit())
                         .frame(minWidth: 48, maxWidth: 88)
                         .textFieldStyle(.roundedBorder)
-                        .accessibilityLabel("Width in points")
+                        .accessibilityLabel("\(fieldLabel) in points")
                     Text("pt")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -550,7 +552,7 @@ private struct LineWidthStepperControl: View {
             editingText = "0"
             return
         }
-        let snapped = LineWidthFormatting.snap(CGFloat(parsed), step: step, min: minWidth, max: max)
+        let snapped = LineWidthFormatting.snap(CGFloat(parsed), step: step, min: minValue, max: max)
         value = snapped
         syncTextFromValue()
     }
@@ -563,6 +565,7 @@ struct LineWidthInputRow: View {
     let step: CGFloat
     let max: CGFloat
     let allowsZero: Bool
+    var fieldLabel: String = "Width"
     let presetOptions: [(CGFloat, String)]
 
     var body: some View {
@@ -575,7 +578,7 @@ struct LineWidthInputRow: View {
             if style == .presetButtons {
                 SegmentedOptionRow(options: presetOptions, selected: $value)
             } else {
-                LineWidthStepperControl(value: $value, step: step, max: max, allowsZero: allowsZero)
+                LineWidthStepperControl(value: $value, step: step, max: max, allowsZero: allowsZero, fieldLabel: fieldLabel)
             }
         }
     }
@@ -596,6 +599,30 @@ struct ToolbarLineWidthStepperPanel: View {
                 .fontWeight(.semibold)
                 .foregroundStyle(.secondary)
             LineWidthStepperControl(value: $width, step: step, max: max, allowsZero: allowsZero)
+        }
+        .padding(16)
+        .frame(width: 280)
+    }
+}
+
+/// Matches `TextToolOptionsView` font size stepper (1 pt steps, max 144).
+struct ToolbarFontSizeStepperPanel: View {
+    @Binding var fontSize: CGFloat
+    var title: String = "Font size"
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            LineWidthStepperControl(
+                value: $fontSize,
+                step: 1,
+                max: 144,
+                allowsZero: false,
+                fieldLabel: "Font size"
+            )
         }
         .padding(16)
         .frame(width: 280)
@@ -694,17 +721,21 @@ private struct ShapeKindButton: View {
 
     private var iconName: String {
         switch kind {
-        case .circle: return "circle"
+        case .circle:    return "circle"
         case .rectangle: return "rectangle"
-        case .triangle: return "triangle"
+        case .triangle:  return "triangle"
+        case .line:      return "line.diagonal"
+        case .arrow:     return "arrow.up.right"
         }
     }
 
     private var label: String {
         switch kind {
-        case .circle: return "Circle"
+        case .circle:    return "Circle"
         case .rectangle: return "Rect"
-        case .triangle: return "Triangle"
+        case .triangle:  return "Triangle"
+        case .line:      return "Line"
+        case .arrow:     return "Arrow"
         }
     }
 }

@@ -17,6 +17,7 @@ public struct ImageEditorView: View {
     let showsHighlightButton: Bool
     let showsLockButton: Bool
     let showsPencilButton: Bool
+    let showsSaveAlert: Bool
 
     public init(
         image: UIImage,
@@ -24,6 +25,7 @@ public struct ImageEditorView: View {
         showsHighlightButton: Bool = true,
         showsLockButton: Bool = true,
         showsPencilButton: Bool = true,
+        showsSaveAlert: Bool = true,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
@@ -32,6 +34,7 @@ public struct ImageEditorView: View {
         self.showsHighlightButton = showsHighlightButton
         self.showsLockButton = showsLockButton
         self.showsPencilButton = showsPencilButton
+        self.showsSaveAlert = showsSaveAlert
     }
 
     public init(
@@ -40,6 +43,7 @@ public struct ImageEditorView: View {
         showsHighlightButton: Bool = true,
         showsLockButton: Bool = true,
         showsPencilButton: Bool = true,
+        showsSaveAlert: Bool = true,
         onSave: ((UIImage) -> Void)? = nil,
         onExport: ((UIImage) -> Void)? = nil
     ) {
@@ -49,6 +53,7 @@ public struct ImageEditorView: View {
         self.showsHighlightButton = showsHighlightButton
         self.showsLockButton = showsLockButton
         self.showsPencilButton = showsPencilButton
+        self.showsSaveAlert = showsSaveAlert
     }
 
     public var body: some View {
@@ -57,7 +62,8 @@ public struct ImageEditorView: View {
             showsDismissButton: showsDismissButton,
             showsHighlightButton: showsHighlightButton,
             showsLockButton: showsLockButton,
-            showsPencilButton: showsPencilButton
+            showsPencilButton: showsPencilButton,
+            showsSaveAlert: showsSaveAlert
         )
     }
 }
@@ -70,6 +76,7 @@ struct ImageFormEditorView: View {
     var showsHighlightButton = true
     var showsLockButton = true
     var showsPencilButton = true
+    var showsSaveAlert = true
     @Environment(\.dismiss) private var dismiss
     private var toolbarChipSize: CGSize {
         viewModel.toolbarCompact ? CGSize(width: 44, height: 40) : CGSize(width: 56, height: 50)
@@ -99,6 +106,11 @@ struct ImageFormEditorView: View {
     @State private var showImageSelectShapeLineWidthPopover = false
     @State private var showImageSelectImageBorderWidthPopover = false
     @State private var showImageSelectTextBorderWidthPopover = false
+    @State private var showsActiveToolSubToolbar = false
+    @State private var showActiveDrawLineWidthPopover = false
+    @State private var showActiveTextBorderWidthPopover = false
+    @State private var showActiveShapeLineWidthPopover = false
+    @State private var showTextToolbarFontSizePopover = false
 
     var body: some View {
         VStack {
@@ -146,7 +158,7 @@ struct ImageFormEditorView: View {
 
                 Button {
                     viewModel.saveImage()
-                    isShowingSaveAlert = true
+                    if showsSaveAlert { isShowingSaveAlert = true }
                 } label: {
                     Text("Save")
                 }
@@ -199,6 +211,9 @@ struct ImageFormEditorView: View {
         .onChange(of: viewModel.activeShapeKind) { _, _ in viewModel.applyShapeStyleToSelected() }
         .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
         .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
+        .onChange(of: viewModel.toolOptionsPresentation) { _, new in
+            if new == .longPressPopover { showsActiveToolSubToolbar = false }
+        }
         .alert("Unsaved Changes", isPresented: $changesNotSaved) {
             Button("Save Changes") {
                 viewModel.saveImage()
@@ -230,143 +245,17 @@ struct ImageFormEditorView: View {
                     toolbarDivider
 
                     // MARK: Draw Section
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Draw")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Draw") {
-                            Image(systemName: "pencil.and.scribble")
-                                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(
-                            viewModel.isDrawingMode && !viewModel.isEraserMode
-                                ? Color.accentColor.opacity(0.3)
-                                : Color.secondary.opacity(0.1),
-                            in: .rect(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    viewModel.setTool(.draw)
-                                    showDrawOptions = true
-                                },
-                                TapGesture().onEnded {
-                                    viewModel.setTool(.draw)
-                                }
-                            )
-                        )
-                        .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
-                            DrawToolOptionsView(
-                                inkColor: Binding(
-                                    get: { Color(viewModel.inkColor) },
-                                    set: { viewModel.inkColor = UIColor($0) }
-                                ),
-                                inkLineWidth: $viewModel.inkLineWidth,
-                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                                lineWidthStep: viewModel.lineWidthStep,
-                                lineWidthMax: viewModel.lineWidthMax
-                            )
-                        }
-                    }
+                    imageDrawToolbarSection
 
                     toolbarDivider
 
                     // MARK: Erase Section
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Erase")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Erase") {
-                            Image(systemName: "eraser")
-                                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(
-                            viewModel.isEraserMode
-                                ? Color.accentColor.opacity(0.3)
-                                : Color.secondary.opacity(0.1),
-                            in: .rect(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    viewModel.setTool(.erase)
-                                    showEraserOptions = true
-                                },
-                                TapGesture().onEnded {
-                                    viewModel.setTool(.erase)
-                                }
-                            )
-                        )
-                        .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
-                            EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
-                        }
-                    }
+                    imageEraseToolbarSection
 
                     toolbarDivider
 
                     // MARK: Text Section
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Text")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Text") {
-                            Image(systemName: "character.cursor.ibeam")
-                                .symbolVariant(viewModel.isTextMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    if !viewModel.isTextMode { viewModel.setTool(.text) }
-                                    showTextOptions = true
-                                },
-                                TapGesture().onEnded { viewModel.setTool(.text) }
-                            )
-                        )
-                        .popover(isPresented: $showTextOptions, arrowEdge: .top) {
-                            TextToolOptionsView(
-                                textColor: Binding(
-                                    get: { Color(viewModel.textBoxTextColor) },
-                                    set: { viewModel.textBoxTextColor = UIColor($0) }
-                                ),
-                                backgroundColor: Binding(
-                                    get: { Color(viewModel.textBoxBackgroundColor) },
-                                    set: { viewModel.textBoxBackgroundColor = UIColor($0) }
-                                ),
-                                fontSize: $viewModel.textBoxFontSize,
-                                isBold: $viewModel.textBoxIsBold,
-                                textAlignment: $viewModel.textBoxTextAlignment,
-                                verticalAlignment: $viewModel.textBoxVerticalAlignment,
-                                autoResize: $viewModel.textBoxAutoResize,
-                                borderWidth: $viewModel.textBoxBorderWidth,
-                                borderColor: Binding(
-                                    get: { Color(viewModel.textBoxBorderColor) },
-                                    set: { viewModel.textBoxBorderColor = UIColor($0) }
-                                ),
-                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                                lineWidthStep: viewModel.lineWidthStep,
-                                lineWidthMax: viewModel.lineWidthMax
-                            )
-                        }
-                    }
+                    imageTextToolbarSection
 
                     toolbarDivider
 
@@ -490,6 +379,7 @@ struct ImageFormEditorView: View {
                                 pencilSqueezeAction: $viewModel.pencilSqueezeAction,
                                 pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction,
                                 toolbarCompact: $viewModel.toolbarCompact,
+                                toolOptionsPresentation: $viewModel.toolOptionsPresentation,
                                 lineWidthInputStyle: $viewModel.lineWidthInputStyle,
                                 lineWidthStep: $viewModel.lineWidthStep,
                                 lineWidthMax: $viewModel.lineWidthMax
@@ -503,10 +393,22 @@ struct ImageFormEditorView: View {
             if showsImageSelectEditToolbar {
                 imageSelectEditToolbar
                     .transition(.move(edge: .top).combined(with: .opacity))
+            } else if showsActiveToolSubToolbarPanel {
+                imageActiveToolSubToolbar
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }//: VSTACK
         .animation(.easeInOut(duration: 0.2), value: showsImageSelectEditToolbar)
+        .animation(.easeInOut(duration: 0.2), value: showsActiveToolSubToolbarPanel)
         .animation(.easeInOut(duration: 0.2), value: viewModel.selectedOverlayKind)
+        .onChange(of: viewModel.activeTool) { _, new in
+            switch new {
+            case .draw, .erase, .text, .shape:
+                break
+            default:
+                showsActiveToolSubToolbar = false
+            }
+        }
         .contentBackgroundModifier()
     }
 
@@ -568,6 +470,8 @@ struct ImageFormEditorView: View {
         case .circle: return "circle"
         case .rectangle: return "rectangle"
         case .triangle: return "triangle"
+        case .line: return "line.diagonal"
+        case .arrow: return "arrow.up.right"
         }
     }
 
@@ -576,7 +480,226 @@ struct ImageFormEditorView: View {
         case .circle: return "Circle"
         case .rectangle: return "Rect"
         case .triangle: return "Tri"
+        case .line: return "Line"
+        case .arrow: return "Arrow"
         }
+    }
+
+    private var showsActiveToolSubToolbarPanel: Bool {
+        viewModel.toolOptionsPresentation == .subToolbar
+            && showsActiveToolSubToolbar
+            && isActiveAnnotationTool(viewModel.activeTool)
+    }
+
+    private func isActiveAnnotationTool(_ tool: EditorTool) -> Bool {
+        switch tool {
+        case .draw, .erase, .text, .shape: return true
+        default: return false
+        }
+    }
+
+    private func imageAnnotationToolbarSecondTapInteraction(toolAlreadyActive: Bool, activate: () -> Void) {
+        if viewModel.toolOptionsPresentation == .subToolbar {
+            if toolAlreadyActive {
+                showsActiveToolSubToolbar.toggle()
+            } else {
+                activate()
+                showsActiveToolSubToolbar = true
+            }
+        } else {
+            activate()
+        }
+    }
+
+    private func handleImageDrawToolTap() {
+        imageAnnotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isDrawingMode && !viewModel.isEraserMode,
+            activate: { viewModel.setTool(.draw) }
+        )
+    }
+
+    private func handleImageEraseToolTap() {
+        imageAnnotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isEraserMode,
+            activate: { viewModel.setTool(.erase) }
+        )
+    }
+
+    private func handleImageTextToolTap() {
+        imageAnnotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isTextMode,
+            activate: { viewModel.setTool(.text) }
+        )
+    }
+
+    private func handleImageShapeToolTap() {
+        imageAnnotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isShapeMode,
+            activate: { viewModel.setTool(.shape) }
+        )
+    }
+
+    @ViewBuilder private var imageDrawToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Draw")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                imageDrawToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isDrawingMode { viewModel.setTool(.draw) }
+                                showDrawOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.draw) }
+                        )
+                    )
+                    .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
+                        DrawToolOptionsView(
+                            inkColor: Binding(
+                                get: { Color(viewModel.inkColor) },
+                                set: { viewModel.inkColor = UIColor($0) }
+                            ),
+                            inkLineWidth: $viewModel.inkLineWidth,
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                imageDrawToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleImageDrawToolTap() })
+            }
+        }
+    }
+
+    private var imageDrawToolChrome: some View {
+        toolbarButtonContent("Draw") {
+            Image(systemName: "pencil.and.scribble")
+                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(
+            viewModel.isDrawingMode && !viewModel.isEraserMode
+                ? Color.accentColor.opacity(0.3)
+                : Color.secondary.opacity(0.1),
+            in: .rect(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder private var imageEraseToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Erase")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                imageEraseToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                viewModel.setTool(.erase)
+                                showEraserOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.erase) }
+                        )
+                    )
+                    .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
+                        EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
+                    }
+            } else {
+                imageEraseToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleImageEraseToolTap() })
+            }
+        }
+    }
+
+    private var imageEraseToolChrome: some View {
+        toolbarButtonContent("Erase") {
+            Image(systemName: "eraser")
+                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(
+            viewModel.isEraserMode
+                ? Color.accentColor.opacity(0.3)
+                : Color.secondary.opacity(0.1),
+            in: .rect(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder private var imageTextToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Text")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                imageTextToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isTextMode { viewModel.setTool(.text) }
+                                showTextOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.text) }
+                        )
+                    )
+                    .popover(isPresented: $showTextOptions, arrowEdge: .top) {
+                        TextToolOptionsView(
+                            textColor: Binding(
+                                get: { Color(viewModel.textBoxTextColor) },
+                                set: { viewModel.textBoxTextColor = UIColor($0) }
+                            ),
+                            backgroundColor: Binding(
+                                get: { Color(viewModel.textBoxBackgroundColor) },
+                                set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+                            ),
+                            fontSize: $viewModel.textBoxFontSize,
+                            isBold: $viewModel.textBoxIsBold,
+                            textAlignment: $viewModel.textBoxTextAlignment,
+                            verticalAlignment: $viewModel.textBoxVerticalAlignment,
+                            borderWidth: $viewModel.textBoxBorderWidth,
+                            borderColor: Binding(
+                                get: { Color(viewModel.textBoxBorderColor) },
+                                set: { viewModel.textBoxBorderColor = UIColor($0) }
+                            ),
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                imageTextToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleImageTextToolTap() })
+            }
+        }
+    }
+
+    private var imageTextToolChrome: some View {
+        toolbarButtonContent("Text") {
+            Image(systemName: "character.cursor.ibeam")
+                .symbolVariant(viewModel.isTextMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
     }
 
     // MARK: - Shape Tool Section
@@ -585,36 +708,331 @@ struct ImageFormEditorView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            toolbarButtonContent("Shape") {
-                Image(systemName: iconName(for: viewModel.activeShapeKind))
-                    .symbolVariant(viewModel.isShapeMode ? .fill : .none)
-                    .fontWeight(.semibold)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                imageShapeToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isShapeMode { viewModel.setTool(.shape) }
+                                showShapeOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.shape) }
+                        )
+                    )
+                    .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
+                        ShapeToolOptionsView(
+                            shapeKind: $viewModel.activeShapeKind,
+                            strokeColor: Binding(
+                                get: { Color(viewModel.shapeStrokeColor) },
+                                set: { viewModel.shapeStrokeColor = UIColor($0) }
+                            ),
+                            lineWidth: $viewModel.shapeLineWidth,
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                imageShapeToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleImageShapeToolTap() })
             }
-            .foregroundStyle(Color.accentColor)
-            .padding(toolbarButtonPadding)
-            .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-            .contentShape(Rectangle())
-            .gesture(
-                ExclusiveGesture(
-                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                        if !viewModel.isShapeMode { viewModel.setTool(.shape) }
-                        showShapeOptions = true
-                    },
-                    TapGesture().onEnded { viewModel.setTool(.shape) }
+        }
+    }
+
+    private var imageShapeToolChrome: some View {
+        toolbarButtonContent("Shape") {
+            Image(systemName: iconName(for: viewModel.activeShapeKind))
+                .symbolVariant(viewModel.isShapeMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+    }
+
+    @ViewBuilder private var imageActiveToolSubToolbar: some View {
+        HStack(alignment: .center, spacing: 8) {
+            switch viewModel.activeTool {
+            case .draw:
+                imageActiveDrawSubtools
+            case .erase:
+                imageActiveEraserSubtools
+            case .text:
+                imageActiveTextSubtoolsForDrawingDefaults
+            case .shape:
+                imageActiveShapeSubtoolsForDrawingDefaults
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 10))
+    }
+
+    @ViewBuilder private var imageActiveDrawSubtools: some View {
+        ToolbarSubtoolsScrollRow {
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.inkColor) },
+                set: { viewModel.inkColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("1pt") { viewModel.inkLineWidth = 1 }
+                            Button("3pt") { viewModel.inkLineWidth = 3 }
+                            Button("6pt") { viewModel.inkLineWidth = 6 }
+                        }
+                    } label: {
+                        imageActiveDrawLineWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showActiveDrawLineWidthPopover = true
+                    } label: {
+                        imageActiveDrawLineWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showActiveDrawLineWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: $viewModel.inkLineWidth,
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: false,
+                            title: "Line width"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var imageActiveDrawLineWidthChipLabel: some View {
+        selectEditToolbarChip("Line width") {
+            Image(systemName: "lineweight").fontWeight(.semibold)
+            Text(
+                LineWidthFormatting.shapeStrokeLabel(
+                    viewModel.inkLineWidth,
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep
                 )
             )
-            .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
-                ShapeToolOptionsView(
-                    shapeKind: $viewModel.activeShapeKind,
-                    strokeColor: Binding(
-                        get: { Color(viewModel.shapeStrokeColor) },
-                        set: { viewModel.shapeStrokeColor = UIColor($0) }
+            .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+    }
+
+    @ViewBuilder private var imageActiveEraserSubtools: some View {
+        ToolbarSubtoolsScrollRow {
+            Menu {
+                MenuScrollableActions {
+                    Button("6pt") { viewModel.eraserRadius = 6 }
+                    Button("9pt") { viewModel.eraserRadius = 9 }
+                    Button("13pt") { viewModel.eraserRadius = 13 }
+                    Button("18pt") { viewModel.eraserRadius = 18 }
+                    Button("24pt") { viewModel.eraserRadius = 24 }
+                }
+            } label: {
+                selectEditToolbarChip("Eraser size") {
+                    Image(systemName: "circle.dotted").fontWeight(.semibold)
+                    Text("\(Int(viewModel.eraserRadius))pt")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    @ViewBuilder private var imageActiveTextSubtoolsForDrawingDefaults: some View {
+        ToolbarSubtoolsScrollRow {
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxTextColor) },
+                set: { viewModel.textBoxTextColor = UIColor($0) }
+            )) {
+                selectEditToolbarChip("Text color") {
+                    Image(systemName: "textformat")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxTextColor))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxBackgroundColor) },
+                set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+            ), supportsOpacity: true) {
+                selectEditToolbarChip("Background color") {
+                    ZStack {
+                        Image(systemName: "rectangle")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "rectangle.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                    }
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            imageTextToolbarFontSizeControl
+
+            Button { viewModel.textBoxIsBold.toggle() } label: {
+                selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
+                    Image(systemName: "bold").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            Menu {
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxTextAlignment = .left
+                    } label: {
+                        Label("Leading", systemImage: "text.alignleft")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .center
+                    } label: {
+                        Label("Center", systemImage: "text.aligncenter")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .right
+                    } label: {
+                        Label("Trailing", systemImage: "text.alignright")
+                    }
+                }
+            } label: {
+                selectEditToolbarChip("Text alignment") {
+                    Image(systemName: imageAlignmentIcon(for: viewModel.textBoxTextAlignment))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            Menu {
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .top
+                    } label: {
+                        Label("Top", systemImage: "arrow.up.to.line")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .middle
+                    } label: {
+                        Label("Middle", systemImage: "arrow.up.and.down")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .bottom
+                    } label: {
+                        Label("Bottom", systemImage: "arrow.down.to.line")
+                    }
+                }
+            } label: {
+                selectEditToolbarChip("Vertical alignment") {
+                    Image(systemName: imageVerticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            Button {
+                showActiveTextBorderWidthPopover = true
+            } label: {
+                imageActiveDefaultTextBoxBorderWidthChipLabel
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showActiveTextBorderWidthPopover, arrowEdge: .top) {
+                ToolbarBorderWidthColorPanel(
+                    width: $viewModel.textBoxBorderWidth,
+                    color: Binding(
+                        get: { Color(viewModel.textBoxBorderColor) },
+                        set: { viewModel.textBoxBorderColor = UIColor($0) }
                     ),
-                    lineWidth: $viewModel.shapeLineWidth,
-                    lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                    lineWidthStep: viewModel.lineWidthStep,
-                    lineWidthMax: viewModel.lineWidthMax
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep,
+                    max: viewModel.lineWidthMax,
+                    title: "Text box border"
                 )
+            }
+        }
+    }
+
+    @ViewBuilder private var imageActiveDefaultTextBoxBorderWidthChipLabel: some View {
+        selectEditToolbarChip("Text box border width", isActive: viewModel.textBoxBorderWidth > 0) {
+            Image(systemName: "square.dashed").fontWeight(.semibold)
+            Text(imageDefaultTextBoxBorderWidthLabel)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(imageDefaultTextBoxBorderControlColor)
+    }
+
+    private var imageDefaultTextBoxBorderWidthLabel: String {
+        guard viewModel.textBoxBorderWidth > 0 else { return "No" }
+        return LineWidthFormatting.toolbarPointsLabel(
+            viewModel.textBoxBorderWidth,
+            style: viewModel.lineWidthInputStyle,
+            step: viewModel.lineWidthStep
+        )
+    }
+
+    private var imageDefaultTextBoxBorderControlColor: Color {
+        viewModel.textBoxBorderWidth > 0 ? Color(viewModel.textBoxBorderColor) : Color.accentColor
+    }
+
+    @ViewBuilder private var imageActiveShapeSubtoolsForDrawingDefaults: some View {
+        ToolbarSubtoolsScrollRow {
+            Menu {
+                shapeKindMenuActions
+            } label: {
+                selectEditToolbarChip("Shape kind") {
+                    Image(systemName: iconName(for: viewModel.activeShapeKind))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                            Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                            Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                            Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+                        }
+                    } label: {
+                        imageSelectShapeLineWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showActiveShapeLineWidthPopover = true
+                    } label: {
+                        imageSelectShapeLineWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showActiveShapeLineWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: $viewModel.shapeLineWidth,
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: false,
+                            title: "Stroke width"
+                        )
+                    }
+                }
             }
         }
     }
@@ -724,34 +1142,11 @@ struct ImageFormEditorView: View {
             .foregroundStyle(Color.accentColor)
         }
 
-        Menu {
-            MenuScrollableActions {
-                Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
-                Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
-                Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
-                Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
-            }
-        } label: {
-            selectEditToolbarChip("Font size") {
-                Image(systemName: "textformat.size").fontWeight(.semibold)
-                Text("\(Int(viewModel.textBoxFontSize))pt")
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-            }
-            .foregroundStyle(Color.accentColor)
-        }
+        imageTextToolbarFontSizeControl
+
         Button { viewModel.textBoxIsBold.toggle() } label: {
             selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
                 Image(systemName: "bold").fontWeight(.semibold)
-            }
-            .foregroundStyle(Color.accentColor)
-        }
-        .buttonStyle(.plain)
-
-        Button { viewModel.toggleSelectedTextBoxAutoResize() } label: {
-            selectEditToolbarChip("Auto size", isActive: viewModel.selectedTextBoxAutoResize) {
-                Image(systemName: "arrow.up.and.down")
-                    .fontWeight(.semibold)
             }
             .foregroundStyle(Color.accentColor)
         }
@@ -962,6 +1357,34 @@ struct ImageFormEditorView: View {
         } label: {
             Label("Triangle", systemImage: iconName(for: .triangle))
         }
+        Button {
+            viewModel.activeShapeKind = .line
+        } label: {
+            Label("Line", systemImage: iconName(for: .line))
+        }
+        Button {
+            viewModel.activeShapeKind = .arrow
+        } label: {
+            Label("Arrow", systemImage: iconName(for: .arrow))
+        }
+    }
+
+    private var imageTextToolbarFontSizeControl: some View {
+        Button {
+            showTextToolbarFontSizePopover = true
+        } label: {
+            selectEditToolbarChip("Font size") {
+                Image(systemName: "textformat.size").fontWeight(.semibold)
+                Text("\(Int(viewModel.textBoxFontSize))pt")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showTextToolbarFontSizePopover, arrowEdge: .top) {
+            ToolbarFontSizeStepperPanel(fontSize: $viewModel.textBoxFontSize)
+        }
     }
 
     @ViewBuilder private var imageSelectImageSubtools: some View {
@@ -1078,7 +1501,6 @@ struct DrawingImageViewRepresentable: UIViewRepresentable {
         view.textBoxTextColor = viewModel.textBoxTextColor
         view.textBoxTextAlignment = viewModel.textBoxTextAlignment
         view.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
-        view.textBoxAutoResize = viewModel.textBoxAutoResize
         view.textBoxBorderWidth = viewModel.textBoxBorderWidth
         view.textBoxBorderColor = viewModel.textBoxBorderColor
         view.isShapeMode = viewModel.activeTool == .shape
@@ -1306,8 +1728,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     var textBoxTextColor: UIColor = .label
     var textBoxTextAlignment: NSTextAlignment = .left
     var textBoxVerticalAlignment: TextVerticalAlignment = .top
-    /// New text boxes inherit this from the image editor toolbar (long-press Text settings).
-    var textBoxAutoResize: Bool = false
     var textBoxBorderWidth: CGFloat = 0
     var textBoxBorderColor: UIColor = .black
 
@@ -1794,10 +2214,15 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         case .ended, .cancelled:
             guard let start = shapeStartPoint else { return }
             shapePreviewLayer.isHidden = true
+            let rawEnd = viewPoint
             shapeStartPoint = nil
-            let rectInView = rectFrom(start, to: viewPoint).insetBy(dx: -2, dy: -2)
-            if rectInView.width >= 20, rectInView.height >= 20 {
-                createShapeBox(with: rectInView)
+            let isLineLike = currentShapeKind == .line || currentShapeKind == .arrow
+            let dragLen = hypot(rawEnd.x - start.x, rawEnd.y - start.y)
+            let framePadding = isLineLike ? ShapeBoxView.lineDrawingInset(for: currentShapeKind, lineWidth: shapeLineWidth) : 2
+            let rectInView = rectFrom(start, to: rawEnd).insetBy(dx: -framePadding, dy: -framePadding)
+            let validDrag = isLineLike ? dragLen >= 20 : (rectInView.width >= 20 && rectInView.height >= 20)
+            if validDrag {
+                createShapeBox(with: rectInView, startPoint: start, endPoint: rawEnd)
             }
         default:
             break
@@ -1818,20 +2243,50 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
             path.close()
             shapePreviewLayer.path = path.cgPath
+        case .line:
+            let path = UIBezierPath()
+            path.move(to: start)
+            path.addLine(to: end)
+            shapePreviewLayer.path = path.cgPath
+        case .arrow:
+            shapePreviewLayer.path = arrowPreviewPath(from: start, to: end).cgPath
         }
     }
 
-    private func createShapeBox(with rectInView: CGRect) {
+    private func arrowPreviewPath(from start: CGPoint, to end: CGPoint) -> UIBezierPath {
+        let path = UIBezierPath()
+        path.move(to: start)
+        path.addLine(to: end)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let len = hypot(dx, dy)
+        guard len > 1 else { return path }
+        let angle = atan2(dy, dx)
+        let headLen: CGFloat = 20
+        let headAngle: CGFloat = .pi / 6
+        path.move(to: CGPoint(x: end.x - headLen * cos(angle - headAngle),
+                              y: end.y - headLen * sin(angle - headAngle)))
+        path.addLine(to: end)
+        path.addLine(to: CGPoint(x: end.x - headLen * cos(angle + headAngle),
+                                 y: end.y - headLen * sin(angle + headAngle)))
+        return path
+    }
+
+    private func createShapeBox(with rectInView: CGRect, startPoint: CGPoint, endPoint: CGPoint) {
+        let isLineLike = currentShapeKind == .line || currentShapeKind == .arrow
+        let minDim: CGFloat = isLineLike ? 5 : 30
         let normalised = CGRect(
             origin: rectInView.origin,
-            size: CGSize(width: max(rectInView.width, 30), height: max(rectInView.height, 30))
+            size: CGSize(width: max(rectInView.width, minDim), height: max(rectInView.height, minDim))
         )
         let state = OverlayShapeState(
             id: UUID(),
             frame: normalised,
             kind: currentShapeKind,
             strokeColor: shapeStrokeColor,
-            lineWidth: shapeLineWidth
+            lineWidth: shapeLineWidth,
+            lineFlippedH: startPoint.x > endPoint.x,
+            lineFlippedV: startPoint.y > endPoint.y
         )
         addShapeBox(from: state)
         viewModel?.didMakeChange(.imageShape(add: state, remove: nil))
@@ -1842,10 +2297,13 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     func addShapeBox(from state: OverlayShapeState) {
         let box = ShapeBoxView(id: state.id, kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
         box.frame = state.frame
+        box.applyLineOrientation(flippedH: state.lineFlippedH, flippedV: state.lineFlippedV)
         box.setSelectMode(isSelectMode)
         box.onSelect = { [weak self] id in self?.selectShapeBox(id: id) }
         box.onEndChange = { [weak self] before, after in
-            guard before.frame != after.frame else { return }
+            let frameChanged = before.frame != after.frame
+            let flipChanged  = before.lineFlippedH != after.lineFlippedH || before.lineFlippedV != after.lineFlippedV
+            guard frameChanged || flipChanged else { return }
             self?.viewModel?.didMakeChange(.imageShapeUpdate(before: before, after: after))
         }
         overlayView.addSubview(box)
@@ -1863,20 +2321,27 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     func shapeBoxState(id: UUID) -> OverlayShapeState? {
         guard let box = shapeBoxViews[id] else { return nil }
-        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind,
+            strokeColor: box.strokeColor, lineWidth: box.lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
     }
 
     func updateShapeBox(from state: OverlayShapeState) {
         guard let box = shapeBoxViews[state.id] else { return }
         box.frame = state.frame
         box.applyStyle(kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.applyLineOrientation(flippedH: state.lineFlippedH, flippedV: state.lineFlippedV)
     }
 
     func applyShapeStyleToSelected(kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
         guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
-        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind,
+            strokeColor: box.strokeColor, lineWidth: box.lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
         box.applyStyle(kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
-        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind,
+            strokeColor: strokeColor, lineWidth: lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
         if before.kind != after.kind || before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
             viewModel?.didMakeChange(.imageShapeUpdate(before: before, after: after))
         }
@@ -1921,7 +2386,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment,
-            autoResizeEnabled: textBoxAutoResize,
             borderWidth: textBoxBorderWidth,
             borderColor: textBoxBorderColor
         )
@@ -1929,11 +2393,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
     }
 
-    /// Creates a minimal auto-expanding text box at a tap point, capped by the
-    /// right edge of the image content area — mirrors `createTapTextBox` in the PDF editor.
+    /// Creates a minimal auto-expanding text box at a tap point.
     private func createTapTextBox(at point: CGPoint) {
-        // point is in overlayView coords, which equals self coords (overlayView.frame == bounds).
-        let maxWidth = max(80, imageContentRect.maxX - point.x)
         let lineHeight = textBoxFontSize + 12   // 6 pt top + 6 pt bottom padding
         let initialFrame = CGRect(
             x: point.x,
@@ -1951,17 +2412,16 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment,
-            autoResizeEnabled: textBoxAutoResize,
             borderWidth: textBoxBorderWidth,
             borderColor: textBoxBorderColor
         )
-        addTextBox(from: state, beginEditing: true, tapCreateMaxWidth: maxWidth)
+        addTextBox(from: state, beginEditing: true)
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
     }
 
     // MARK: - Overlay Text Box Methods
 
-    func addTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false, tapCreateMaxWidth: CGFloat? = nil) {
+    func addTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false) {
         let box = TextBoxView(id: state.id)
         box.frame = state.frame
         box.setText(state.text)
@@ -1970,10 +2430,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setTextColor(state.textColor)
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
-        box.setAutoResize(state.autoResizeEnabled)
-        if let maxWidth = tapCreateMaxWidth {
-            box.setTapCreateAutoResize(enabled: true, maxWidth: maxWidth)
-        }
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
@@ -1999,10 +2455,8 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setTextColor(state.textColor)
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
-        box.setAutoResize(state.autoResizeEnabled)
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
         if selectedTextBoxID == state.id {
-            viewModel?.selectedTextBoxAutoResize = state.autoResizeEnabled
             viewModel?.selectedTextBoxBorderWidth = state.borderWidth
             viewModel?.selectedTextBoxBorderColor = state.borderColor
         }
@@ -2032,7 +2486,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             textColor: box.currentTextColor,
             textAlignment: box.currentTextAlignment,
             verticalAlignment: box.currentVerticalAlignment,
-            autoResizeEnabled: box.currentAutoResize,
             borderWidth: box.currentBorderWidth,
             borderColor: box.currentBorderColor
         )
@@ -2050,16 +2503,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         box.setBackground(backgroundColor)
         box.setTextAlignment(textAlignment)
         box.setVerticalAlignment(verticalAlignment)
-    }
-
-    func setSelectedTextBoxAutoResize(_ enabled: Bool) {
-        guard let id = selectedTextBoxID,
-              let box = textBoxViews[id],
-              let before = textBoxState(id: id),
-              before.autoResizeEnabled != enabled else { return }
-        box.setAutoResize(enabled)
-        let after = textBoxState(id: id)!
-        viewModel?.didMakeChange(.textBoxUpdate(before: before, after: after))
     }
 
     // MARK: - Overlay Image Box Methods
@@ -2159,7 +2602,6 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         selectedShapeID = nil
         viewModel?.selectedOverlayKind = .textBox
         if let box = textBoxViews[id] {
-            viewModel?.selectedTextBoxAutoResize = box.currentAutoResize
             viewModel?.selectedTextBoxBorderWidth = box.currentBorderWidth
             viewModel?.selectedTextBoxBorderColor = box.currentBorderColor
         }

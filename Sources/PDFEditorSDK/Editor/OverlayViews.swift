@@ -35,6 +35,10 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     /// Added only while Scribble should be suppressed; `UITextView` has no `isScribbleEnabled` (unlike `UITextField`).
     private var scribbleSuppressionInteraction: UIScribbleInteraction?
     private let padding = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+    /// True once the text contains an explicit newline (user pressed Return).
+    /// While true, horizontal auto-expansion is suppressed — the width is fixed
+    /// and only the height grows. Resets automatically if all newlines are removed.
+    private var widthLockedByNewline = false
     private let moveHandle = UIView()
     private let moveIcon = UIImageView()
     private let resizeHitTarget = ResizeHandleHitTargetView()
@@ -56,8 +60,6 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     var currentTextAlignment: NSTextAlignment { textView.textAlignment }
     private var _verticalAlignment: TextVerticalAlignment = .top
     var currentVerticalAlignment: TextVerticalAlignment { _verticalAlignment }
-    private var _autoResizeEnabled: Bool = false
-    var currentAutoResize: Bool { _autoResizeEnabled }
     private var _borderWidth: CGFloat = 0
     private var _borderColor: UIColor = .black
     var currentBorderWidth: CGFloat { _borderWidth }
@@ -191,7 +193,8 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
     
     func setText(_ text: String) {
         textView.text = text
-        if _autoResizeEnabled { autoExpandIfNeeded() }
+        widthLockedByNewline = text.contains("\n")
+        autoExpandIfNeeded()
         updateVerticalInset()
     }
 
@@ -201,25 +204,8 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
 
     func setFontSize(_ size: CGFloat, isBold: Bool = false) {
         textView.font = isBold ? UIFont.boldSystemFont(ofSize: size) : UIFont.systemFont(ofSize: size)
-        if _autoResizeEnabled { autoExpandIfNeeded() }
+        autoExpandIfNeeded()
         updateVerticalInset()
-    }
-
-    func setAutoResize(_ enabled: Bool) {
-        _autoResizeEnabled = enabled
-        if enabled { autoExpandIfNeeded() }
-        updateOverflowIndicator()
-    }
-
-    /// Backward-compatible entry point used by tap-create code paths.
-    /// Keeps auto-resize enabled and optionally clamps the initial width.
-    func setTapCreateAutoResize(enabled: Bool, maxWidth: CGFloat) {
-        setAutoResize(enabled)
-        guard enabled, maxWidth > 0 else { return }
-        if frame.width > maxWidth {
-            frame = CGRect(origin: frame.origin, size: CGSize(width: maxWidth, height: frame.height))
-            autoExpandIfNeeded()
-        }
     }
 
     func updateBorder(width: CGFloat, color: UIColor) {
@@ -238,17 +224,52 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         layer.borderColor = _borderWidth > 0 ? _borderColor.cgColor : UIColor.clear.cgColor
     }
 
-    /// Grows the text box height vertically to fit the current text content.
-    /// Only modifies height; the user retains full control of width and position.
+    /// Grows the text box to fit its content when needed, but never shrinks it.
+    ///
+    /// **Auto-width mode** (no explicit newlines in the text): the box expands
+    /// horizontally as content grows, up to the container's right edge, then wraps
+    /// and grows vertically for additional lines.
+    ///
+    /// **Fixed-width mode** (text contains an explicit newline — user pressed Return):
+    /// the width is frozen at its current value and only the height grows. The mode
+    /// reverts to auto-width if the user removes all newlines.
+    ///
+    /// In both modes the box can only get larger; it never collapses below the size
+    /// it was drawn at or last manually resized to.
     private func autoExpandIfNeeded() {
-        guard _autoResizeEnabled, let container = superview else { return }
-        let textWidth = max(1, bounds.width - padding.left - padding.right)
-        let fitting = textView.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude))
-        let required = max(minSize.height, ceil(fitting.height) + padding.top + padding.bottom)
-        let maxAllowed = container.bounds.height - frame.origin.y
-        let newHeight = min(required, maxAllowed)
-        guard abs(newHeight - frame.height) > 0.5 else { return }
-        frame = CGRect(origin: frame.origin, size: CGSize(width: frame.width, height: newHeight))
+        guard let container = superview else { return }
+
+        let resolvedWidth: CGFloat
+
+        if widthLockedByNewline {
+            // Fixed-width mode: honour the current width, don't grow horizontally.
+            resolvedWidth = frame.width
+        } else {
+            // Auto-width mode: expand to fit content on one line, capped at the
+            // container's right edge, but never shrink below the current width.
+            let containerMaxWidth = container.bounds.width - frame.origin.x
+            let clampedMaxWidth = max(minSize.width, containerMaxWidth)
+            let singleLineFit = textView.sizeThatFits(CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude))
+            let idealWidth = ceil(singleLineFit.width) + padding.left + padding.right
+            let contentFitWidth = max(minSize.width, min(idealWidth, clampedMaxWidth))
+            resolvedWidth = max(frame.width, contentFitWidth)
+        }
+
+        // Height: measure at the resolved width so word-wrap is computed against
+        // the actual box width (important when width is capped at the container edge).
+        let textWidth = max(1, resolvedWidth - padding.left - padding.right)
+        let heightFit = textView.sizeThatFits(CGSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude))
+        let contentFitHeight = max(minSize.height, ceil(heightFit.height) + padding.top + padding.bottom)
+        let maxAllowedHeight = container.bounds.height - frame.origin.y
+        let contentFitHeightClamped = min(contentFitHeight, maxAllowedHeight)
+        // Never shrink below the current height.
+        let resolvedHeight = max(frame.height, contentFitHeightClamped)
+
+        let widthChanged = abs(resolvedWidth - frame.width) > 0.5
+        let heightChanged = abs(resolvedHeight - frame.height) > 0.5
+        guard widthChanged || heightChanged else { return }
+
+        frame = CGRect(origin: frame.origin, size: CGSize(width: resolvedWidth, height: resolvedHeight))
     }
     
     func setTextColor(_ color: UIColor) {
@@ -453,12 +474,15 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         }
         textView.typingAttributes[.font] = font
         textView.typingAttributes[.foregroundColor] = textColor
-        if _autoResizeEnabled { autoExpandIfNeeded() }
+        autoExpandIfNeeded()
         updateVerticalInset()
     }
 
     func textViewDidChange(_ textView: UITextView) {
-        if _autoResizeEnabled { autoExpandIfNeeded() }
+        // Lock horizontal expansion once the user explicitly breaks a line.
+        // Unlock if they remove all newlines and return to single-line text.
+        widthLockedByNewline = textView.text?.contains("\n") ?? false
+        autoExpandIfNeeded()
         updateVerticalInset()
     }
 
@@ -777,6 +801,10 @@ final class ShapeBoxView: UIView {
     private(set) var shapeKind: OverlayShapeKind
     private(set) var strokeColor: UIColor
     private(set) var lineWidth: CGFloat
+    /// For .line/.arrow: true when the start endpoint is on the right side of the frame.
+    private(set) var lineFlippedH: Bool = false
+    /// For .line/.arrow: true when the start endpoint is below the end endpoint.
+    private(set) var lineFlippedV: Bool = false
 
     var onSelect: ((UUID) -> Void)?
     var onEndChange: ((OverlayShapeState, OverlayShapeState) -> Void)?
@@ -785,17 +813,47 @@ final class ShapeBoxView: UIView {
     private var isSelected: Bool = false
 
     private let selectionBorderLayer = CAShapeLayer()
+    // Primary handle: moves whole shape (non-line) or start endpoint (line/arrow)
     private let moveHandle = UIView()
     private let moveIcon = UIImageView()
+    // Secondary handle: resizes (non-line) or moves end endpoint (line/arrow)
     private let resizeHitTarget = ResizeHandleHitTargetView()
     private let resizeHandleVisual = UIView()
     private let resizeIcon = UIImageView()
     private var pinchGesture: UIPinchGestureRecognizer?
     private let resizeFeedback = UIImpactFeedbackGenerator(style: .light)
     private let minSize = CGSize(width: 30, height: 30)
+    private let minLineSize = CGSize(width: 5, height: 5)
     private let resizeVisualSize: CGFloat = 24
     private var pinchStartFrame: CGRect = .zero
     private var startFrame: CGRect = .zero
+    private var startLineFlippedH: Bool = false
+    private var startLineFlippedV: Bool = false
+
+    private var isLineKind: Bool { shapeKind == .line || shapeKind == .arrow }
+    private var lineDrawingInset: CGFloat {
+        Self.lineDrawingInset(for: shapeKind, lineWidth: lineWidth)
+    }
+    private var lineDrawableBounds: CGRect {
+        let inset = min(lineDrawingInset, bounds.width / 2, bounds.height / 2)
+        return bounds.insetBy(dx: inset, dy: inset)
+    }
+
+    // Endpoints in bounds coordinates
+    private var lineStartInBounds: CGPoint {
+        let drawableBounds = lineDrawableBounds
+        return CGPoint(
+            x: lineFlippedH ? drawableBounds.maxX : drawableBounds.minX,
+            y: lineFlippedV ? drawableBounds.maxY : drawableBounds.minY
+        )
+    }
+    private var lineEndInBounds: CGPoint {
+        let drawableBounds = lineDrawableBounds
+        return CGPoint(
+            x: lineFlippedH ? drawableBounds.minX : drawableBounds.maxX,
+            y: lineFlippedV ? drawableBounds.minY : drawableBounds.maxY
+        )
+    }
 
     init(id: UUID, kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
         self.id = id
@@ -828,7 +886,7 @@ final class ShapeBoxView: UIView {
         selectionBorderLayer.isHidden = true
         layer.addSublayer(selectionBorderLayer)
 
-        // Move handle (top-left, blue)
+        // Move/start handle (blue)
         moveHandle.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
         moveHandle.layer.cornerRadius = 6
         moveHandle.layer.borderWidth = 1
@@ -839,7 +897,7 @@ final class ShapeBoxView: UIView {
         moveHandle.addSubview(moveIcon)
         addSubview(moveHandle)
 
-        // Resize handle (bottom-right, orange)
+        // Resize/end handle (orange)
         resizeHandleVisual.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.12)
         resizeHandleVisual.layer.cornerRadius = 6
         resizeHandleVisual.layer.borderWidth = 1
@@ -852,105 +910,235 @@ final class ShapeBoxView: UIView {
         addSubview(resizeHitTarget)
         resizeHitTarget.isUserInteractionEnabled = true
 
-        // Move handle pan
         let movePan = UIPanGestureRecognizer(target: self, action: #selector(handleMovePan(_:)))
         moveHandle.addGestureRecognizer(movePan)
         moveHandle.isUserInteractionEnabled = true
 
-        // Body pan
         let bodyPan = UIPanGestureRecognizer(target: self, action: #selector(handleBodyMovePan(_:)))
         addGestureRecognizer(bodyPan)
 
-        // Resize handle pan
         let resizePan = UIPanGestureRecognizer(target: self, action: #selector(handleResizePan(_:)))
         resizeHitTarget.addGestureRecognizer(resizePan)
 
-        // Pinch gesture
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         pinchGesture = pinch
         addGestureRecognizer(pinch)
 
-        // Tap to select
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleSelect))
         addGestureRecognizer(tap)
 
         updateHandleVisibility()
     }
 
+    /// Sets the line orientation flags and triggers redraw/layout.
+    func applyLineOrientation(flippedH: Bool, flippedV: Bool) {
+        lineFlippedH = flippedH
+        lineFlippedV = flippedV
+        setNeedsDisplay()
+        setNeedsLayout()
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        overlayHitTestForwardingOutOfBounds(host: self, point: point, event: event) { p, e in
+        if isLineKind {
+            return lineHitTest(point, with: event)
+        }
+        return overlayHitTestForwardingOutOfBounds(host: self, point: point, event: event) { p, e in
             super.hitTest(p, with: e)
         }
+    }
+
+    private func lineHitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return nil }
+
+        for subview in subviews.reversed() {
+            guard subview.isUserInteractionEnabled, !subview.isHidden, subview.alpha > 0.01 else { continue }
+            let convertedPoint = subview.convert(point, from: self)
+            if let hit = subview.hitTest(convertedPoint, with: event) {
+                return hit
+            }
+        }
+
+        guard bounds.contains(point), lineInteractionPath().contains(point) else { return nil }
+        return self
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
 
         let handleSize: CGFloat = 16
-        moveHandle.frame = CGRect(x: -6, y: -6, width: handleSize, height: handleSize)
-        moveIcon.frame = moveHandle.bounds.insetBy(dx: 2, dy: 2)
         let v = resizeVisualSize
-        resizeHitTarget.frame = CGRect(
-            x: bounds.width - v + 6,
-            y: bounds.height - v + 6,
-            width: v,
-            height: v
-        )
+
+        if isLineKind {
+            // Position handles at the line endpoints
+            let startCorner = lineStartCornerOffset(handleSize: handleSize)
+            let endCorner   = lineEndCornerOffset(handleSize: v)
+            moveHandle.frame = CGRect(origin: startCorner, size: CGSize(width: handleSize, height: handleSize))
+            resizeHitTarget.frame = CGRect(origin: endCorner, size: CGSize(width: v, height: v))
+        } else {
+            moveHandle.frame = CGRect(x: -6, y: -6, width: handleSize, height: handleSize)
+            resizeHitTarget.frame = CGRect(
+                x: bounds.width - v + 6,
+                y: bounds.height - v + 6,
+                width: v, height: v
+            )
+        }
+        moveIcon.frame = moveHandle.bounds.insetBy(dx: 2, dy: 2)
         resizeHandleVisual.frame = resizeHitTarget.bounds
         resizeIcon.frame = resizeHandleVisual.bounds.insetBy(dx: 3, dy: 3)
 
-        // Update selection border layer path to match the drawn shape
-        let inset = lineWidth / 2
-        let insetBounds = bounds.insetBy(dx: inset, dy: inset)
+        // Selection border
         selectionBorderLayer.frame = bounds
+        selectionBorderLayer.path = selectionPath().cgPath
+    }
+
+    // Returns the frame origin for the start-point handle (centered on the start corner).
+    private func lineStartCornerOffset(handleSize: CGFloat) -> CGPoint {
+        let start = lineStartInBounds
+        return CGPoint(x: start.x - handleSize / 2, y: start.y - handleSize / 2)
+    }
+
+    // Returns the frame origin for the end-point handle (centered on the end corner).
+    private func lineEndCornerOffset(handleSize: CGFloat) -> CGPoint {
+        let end = lineEndInBounds
+        return CGPoint(x: end.x - handleSize / 2, y: end.y - handleSize / 2)
+    }
+
+    private func selectionPath() -> UIBezierPath {
+        let inset = max(lineWidth / 2, 1)
+        let r = bounds.insetBy(dx: inset, dy: inset)
         switch shapeKind {
         case .circle:
-            selectionBorderLayer.path = UIBezierPath(ovalIn: insetBounds).cgPath
+            return UIBezierPath(ovalIn: r)
         case .rectangle:
-            selectionBorderLayer.path = UIBezierPath(roundedRect: insetBounds, cornerRadius: 4).cgPath
+            return UIBezierPath(roundedRect: r, cornerRadius: 4)
         case .triangle:
             let path = UIBezierPath()
-            path.move(to: CGPoint(x: insetBounds.midX, y: insetBounds.minY))
-            path.addLine(to: CGPoint(x: insetBounds.maxX, y: insetBounds.maxY))
-            path.addLine(to: CGPoint(x: insetBounds.minX, y: insetBounds.maxY))
+            path.move(to:    CGPoint(x: r.midX,  y: r.minY))
+            path.addLine(to: CGPoint(x: r.maxX,  y: r.maxY))
+            path.addLine(to: CGPoint(x: r.minX,  y: r.maxY))
             path.close()
-            selectionBorderLayer.path = path.cgPath
+            return path
+        case .line, .arrow:
+            let path = UIBezierPath()
+            path.move(to: lineStartInBounds)
+            path.addLine(to: lineEndInBounds)
+            return path
         }
+    }
+
+    private func lineInteractionPath() -> UIBezierPath {
+        let path = UIBezierPath(cgPath: lineShapePath().cgPath)
+        let hitWidth = max(lineWidth + 16, 24)
+        let strokedPath = path.cgPath.copy(
+            strokingWithWidth: hitWidth,
+            lineCap: .round,
+            lineJoin: .round,
+            miterLimit: 10
+        )
+        return UIBezierPath(cgPath: strokedPath)
+    }
+
+    private func lineShapePath() -> UIBezierPath {
+        let start = lineStartInBounds
+        let end = lineEndInBounds
+        let path = UIBezierPath()
+        path.move(to: start)
+        path.addLine(to: end)
+
+        guard shapeKind == .arrow else { return path }
+
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 1 else { return path }
+
+        let angle = atan2(dy, dx)
+        let headLength = max(lineWidth * 5, 18)
+        let headAngle: CGFloat = .pi / 6
+        let firstPoint = CGPoint(
+            x: end.x - headLength * cos(angle - headAngle),
+            y: end.y - headLength * sin(angle - headAngle)
+        )
+        let secondPoint = CGPoint(
+            x: end.x - headLength * cos(angle + headAngle),
+            y: end.y - headLength * sin(angle + headAngle)
+        )
+
+        path.move(to: firstPoint)
+        path.addLine(to: end)
+        path.addLine(to: secondPoint)
+        return path
     }
 
     override func draw(_ rect: CGRect) {
         strokeColor.setStroke()
-        let insetRect = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
         switch shapeKind {
         case .circle:
-            let path = UIBezierPath(ovalIn: insetRect)
+            let path = UIBezierPath(ovalIn: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2))
             path.lineWidth = lineWidth
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
+            path.lineCapStyle = .round; path.lineJoinStyle = .round
             path.stroke()
         case .rectangle:
-            let path = UIBezierPath(roundedRect: insetRect, cornerRadius: 4)
+            let path = UIBezierPath(roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2), cornerRadius: 4)
             path.lineWidth = lineWidth
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
+            path.lineCapStyle = .round; path.lineJoinStyle = .round
             path.stroke()
         case .triangle:
+            let r = bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2)
             let path = UIBezierPath()
-            path.move(to: CGPoint(x: insetRect.midX, y: insetRect.minY))
-            path.addLine(to: CGPoint(x: insetRect.maxX, y: insetRect.maxY))
-            path.addLine(to: CGPoint(x: insetRect.minX, y: insetRect.maxY))
+            path.move(to:    CGPoint(x: r.midX, y: r.minY))
+            path.addLine(to: CGPoint(x: r.maxX, y: r.maxY))
+            path.addLine(to: CGPoint(x: r.minX, y: r.maxY))
             path.close()
             path.lineWidth = lineWidth
-            path.lineCapStyle = .round
-            path.lineJoinStyle = .round
+            path.lineCapStyle = .round; path.lineJoinStyle = .round
             path.stroke()
+        case .line:
+            let path = UIBezierPath()
+            path.move(to: lineStartInBounds)
+            path.addLine(to: lineEndInBounds)
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.stroke()
+        case .arrow:
+            let start = lineStartInBounds
+            let end   = lineEndInBounds
+            // Main shaft
+            let shaft = UIBezierPath()
+            shaft.move(to: start)
+            shaft.addLine(to: end)
+            shaft.lineWidth = lineWidth
+            shaft.lineCapStyle = .round
+            shaft.stroke()
+            // Arrowhead
+            drawArrowhead(from: start, to: end)
         }
     }
 
+    private func drawArrowhead(from start: CGPoint, to end: CGPoint) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let len = hypot(dx, dy)
+        guard len > 1 else { return }
+        let angle = atan2(dy, dx)
+        let headLen = max(lineWidth * 5, 18)
+        let headAngle: CGFloat = .pi / 6   // 30°
+        let p1 = CGPoint(x: end.x - headLen * cos(angle - headAngle),
+                         y: end.y - headLen * sin(angle - headAngle))
+        let p2 = CGPoint(x: end.x - headLen * cos(angle + headAngle),
+                         y: end.y - headLen * sin(angle + headAngle))
+        let path = UIBezierPath()
+        path.move(to: p1)
+        path.addLine(to: end)
+        path.addLine(to: p2)
+        path.lineWidth = lineWidth
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        path.stroke()
+    }
+
     func applyStyle(kind: OverlayShapeKind? = nil, strokeColor: UIColor, lineWidth: CGFloat) {
-        if let kind {
-            self.shapeKind = kind
-        }
+        if let kind { self.shapeKind = kind }
         self.strokeColor = strokeColor
         self.lineWidth = lineWidth
         setNeedsDisplay()
@@ -960,7 +1148,7 @@ final class ShapeBoxView: UIView {
     func setSelectMode(_ enabled: Bool) {
         isSelectMode = enabled
         if !enabled { isSelected = false }
-        pinchGesture?.isEnabled = enabled
+        pinchGesture?.isEnabled = enabled && !isLineKind
         updateHandleVisibility()
     }
 
@@ -976,6 +1164,22 @@ final class ShapeBoxView: UIView {
         selectionBorderLayer.isHidden = !(isSelectMode && isSelected)
     }
 
+    private func currentState(frame: CGRect? = nil) -> OverlayShapeState {
+        OverlayShapeState(
+            id: id, frame: frame ?? self.frame,
+            kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth,
+            lineFlippedH: lineFlippedH, lineFlippedV: lineFlippedV
+        )
+    }
+
+    static func lineDrawingInset(for kind: OverlayShapeKind, lineWidth: CGFloat) -> CGFloat {
+        guard kind == .line || kind == .arrow else { return 0 }
+        let strokeInset = max(lineWidth / 2, 1)
+        guard kind == .arrow else { return strokeInset }
+        let arrowHeadInset = max(lineWidth * 5, 18) * 0.5 + strokeInset
+        return max(strokeInset, arrowHeadInset)
+    }
+
     @objc private func handleSelect() {
         guard isSelectMode else { return }
         isSelected = true
@@ -984,6 +1188,7 @@ final class ShapeBoxView: UIView {
         updateHandleVisibility()
     }
 
+    // For line/arrow: moves the START endpoint. For others: moves the whole shape.
     @objc private func handleMovePan(_ gesture: UIPanGestureRecognizer) {
         guard isSelectMode else { return }
         guard let container = superview else { return }
@@ -991,21 +1196,28 @@ final class ShapeBoxView: UIView {
         switch gesture.state {
         case .began:
             startFrame = frame
-            isSelected = true
-            onSelect?(id)
-            updateHandleVisibility()
+            startLineFlippedH = lineFlippedH
+            startLineFlippedV = lineFlippedV
+            isSelected = true; onSelect?(id); updateHandleVisibility()
         case .changed:
-            var newFrame = frame.offsetBy(dx: translation.x, dy: translation.y)
-            newFrame.origin.x = max(0, min(newFrame.origin.x, container.bounds.width - newFrame.width))
-            newFrame.origin.y = max(0, min(newFrame.origin.y, container.bounds.height - newFrame.height))
-            frame = newFrame
+            if isLineKind {
+                moveLineEndpoint(isStart: true, dx: translation.x, dy: translation.y, in: container)
+            } else {
+                var f = frame.offsetBy(dx: translation.x, dy: translation.y)
+                f.origin.x = max(0, min(f.origin.x, container.bounds.width  - f.width))
+                f.origin.y = max(0, min(f.origin.y, container.bounds.height - f.height))
+                frame = f
+            }
             gesture.setTranslation(.zero, in: container)
         case .ended, .cancelled:
-            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            onEndChange?(before, after)
-        default:
-            break
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind,
+                strokeColor: strokeColor, lineWidth: lineWidth,
+                lineFlippedH: startLineFlippedH, lineFlippedV: startLineFlippedV)
+            let after = currentState()
+            if before.frame != after.frame || before.lineFlippedH != after.lineFlippedH || before.lineFlippedV != after.lineFlippedV {
+                onEndChange?(before, after)
+            }
+        default: break
         }
     }
 
@@ -1016,27 +1228,27 @@ final class ShapeBoxView: UIView {
         switch gesture.state {
         case .began:
             startFrame = frame
-            isSelected = true
-            onSelect?(id)
-            superview?.bringSubviewToFront(self)
-            updateHandleVisibility()
+            startLineFlippedH = lineFlippedH
+            startLineFlippedV = lineFlippedV
+            isSelected = true; onSelect?(id)
+            superview?.bringSubviewToFront(self); updateHandleVisibility()
         case .changed:
-            var newFrame = frame.offsetBy(dx: translation.x, dy: translation.y)
-            newFrame.origin.x = max(0, min(newFrame.origin.x, container.bounds.width - newFrame.width))
-            newFrame.origin.y = max(0, min(newFrame.origin.y, container.bounds.height - newFrame.height))
-            frame = newFrame
+            var f = frame.offsetBy(dx: translation.x, dy: translation.y)
+            f.origin.x = max(0, min(f.origin.x, container.bounds.width  - f.width))
+            f.origin.y = max(0, min(f.origin.y, container.bounds.height - f.height))
+            frame = f
             gesture.setTranslation(.zero, in: container)
         case .ended, .cancelled:
-            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            if before.frame != after.frame {
-                onEndChange?(before, after)
-            }
-        default:
-            break
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind,
+                strokeColor: strokeColor, lineWidth: lineWidth,
+                lineFlippedH: startLineFlippedH, lineFlippedV: startLineFlippedV)
+            let after = currentState()
+            if before.frame != after.frame { onEndChange?(before, after) }
+        default: break
         }
     }
 
+    // For line/arrow: moves the END endpoint. For others: resizes from bottom-right corner.
     @objc private func handleResizePan(_ gesture: UIPanGestureRecognizer) {
         guard isSelectMode else { return }
         guard let container = superview else { return }
@@ -1044,74 +1256,104 @@ final class ShapeBoxView: UIView {
         switch gesture.state {
         case .began:
             startFrame = frame
-            isSelected = true
-            onSelect?(id)
-            resizeFeedback.prepare()
-            resizeFeedback.impactOccurred()
+            startLineFlippedH = lineFlippedH
+            startLineFlippedV = lineFlippedV
+            isSelected = true; onSelect?(id)
+            resizeFeedback.prepare(); resizeFeedback.impactOccurred()
             UIView.animate(withDuration: 0.15, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
                 self.resizeHandleVisual.transform = CGAffineTransform(scaleX: 1.18, y: 1.18)
             }
             updateHandleVisibility()
         case .changed:
-            var newSize = CGSize(
-                width: max(minSize.width, frame.width + translation.x),
-                height: max(minSize.height, frame.height + translation.y)
-            )
-            if frame.origin.x + newSize.width > container.bounds.width {
-                newSize.width = container.bounds.width - frame.origin.x
+            if isLineKind {
+                moveLineEndpoint(isStart: false, dx: translation.x, dy: translation.y, in: container)
+            } else {
+                var newSize = CGSize(
+                    width:  max(minSize.width,  frame.width  + translation.x),
+                    height: max(minSize.height, frame.height + translation.y)
+                )
+                if frame.origin.x + newSize.width  > container.bounds.width  { newSize.width  = container.bounds.width  - frame.origin.x }
+                if frame.origin.y + newSize.height > container.bounds.height { newSize.height = container.bounds.height - frame.origin.y }
+                frame = CGRect(origin: frame.origin, size: newSize)
             }
-            if frame.origin.y + newSize.height > container.bounds.height {
-                newSize.height = container.bounds.height - frame.origin.y
-            }
-            frame = CGRect(origin: frame.origin, size: newSize)
             gesture.setTranslation(.zero, in: container)
         case .ended, .cancelled:
             UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction, .curveEaseOut]) {
                 self.resizeHandleVisual.transform = .identity
             }
-            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            if before.frame != after.frame {
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind,
+                strokeColor: strokeColor, lineWidth: lineWidth,
+                lineFlippedH: startLineFlippedH, lineFlippedV: startLineFlippedV)
+            let after = currentState()
+            if before.frame != after.frame || before.lineFlippedH != after.lineFlippedH || before.lineFlippedV != after.lineFlippedV {
                 onEndChange?(before, after)
             }
-        default:
-            break
+        default: break
         }
     }
 
+    /// Moves one endpoint of the line/arrow by (dx, dy) in container coordinates.
+    private func moveLineEndpoint(isStart: Bool, dx: CGFloat, dy: CGFloat, in container: UIView) {
+        // Compute current endpoints in container space
+        let startInBounds = lineStartInBounds
+        let endInBounds = lineEndInBounds
+        let startPt = CGPoint(
+            x: frame.minX + startInBounds.x,
+            y: frame.minY + startInBounds.y
+        )
+        let endPt = CGPoint(
+            x: frame.minX + endInBounds.x,
+            y: frame.minY + endInBounds.y
+        )
+        var movingPt  = isStart ? startPt : endPt
+        let fixedPt   = isStart ? endPt   : startPt
+        movingPt.x = max(0, min(movingPt.x + dx, container.bounds.width))
+        movingPt.y = max(0, min(movingPt.y + dy, container.bounds.height))
+
+        let newStart = isStart ? movingPt : fixedPt
+        let newEnd   = isStart ? fixedPt  : movingPt
+        let drawingInset = lineDrawingInset
+        let newFrame = CGRect(
+            x: min(newStart.x, newEnd.x) - drawingInset,
+            y: min(newStart.y, newEnd.y) - drawingInset,
+            width: max(abs(newEnd.x - newStart.x), minLineSize.width) + drawingInset * 2,
+            height: max(abs(newEnd.y - newStart.y), minLineSize.height) + drawingInset * 2
+        )
+        frame = newFrame
+        lineFlippedH = newStart.x > newEnd.x
+        lineFlippedV = newStart.y > newEnd.y
+        setNeedsDisplay()
+    }
+
     @objc private func handlePinch(_ gesture: UIPinchGestureRecognizer) {
-        guard isSelectMode else { return }
+        guard isSelectMode, !isLineKind else { return }
         guard let container = superview else { return }
         switch gesture.state {
         case .began:
-            pinchStartFrame = frame
-            startFrame = frame
-            isSelected = true
-            onSelect?(id)
-            superview?.bringSubviewToFront(self)
-            updateHandleVisibility()
+            pinchStartFrame = frame; startFrame = frame
+            startLineFlippedH = lineFlippedH; startLineFlippedV = lineFlippedV
+            isSelected = true; onSelect?(id)
+            superview?.bringSubviewToFront(self); updateHandleVisibility()
         case .changed:
             let scale = gesture.scale
             let center = CGPoint(x: pinchStartFrame.midX, y: pinchStartFrame.midY)
-            var newW = max(minSize.width, pinchStartFrame.width * scale)
+            var newW = max(minSize.width,  pinchStartFrame.width  * scale)
             var newH = max(minSize.height, pinchStartFrame.height * scale)
             var newX = center.x - newW / 2
             var newY = center.y - newH / 2
-            newX = max(0, min(newX, container.bounds.width - newW))
+            newX = max(0, min(newX, container.bounds.width  - newW))
             newY = max(0, min(newY, container.bounds.height - newH))
-            newW = min(newW, container.bounds.width - newX)
+            newW = min(newW, container.bounds.width  - newX)
             newH = min(newH, container.bounds.height - newY)
-            newW = max(minSize.width, newW)
-            newH = max(minSize.height, newH)
+            newW = max(minSize.width, newW); newH = max(minSize.height, newH)
             frame = CGRect(x: newX, y: newY, width: newW, height: newH)
         case .ended, .cancelled:
-            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            let after = OverlayShapeState(id: id, frame: frame, kind: shapeKind, strokeColor: strokeColor, lineWidth: lineWidth)
-            if before.frame != after.frame {
-                onEndChange?(before, after)
-            }
-        default:
-            break
+            let before = OverlayShapeState(id: id, frame: startFrame, kind: shapeKind,
+                strokeColor: strokeColor, lineWidth: lineWidth,
+                lineFlippedH: startLineFlippedH, lineFlippedV: startLineFlippedV)
+            let after = currentState()
+            if before.frame != after.frame { onEndChange?(before, after) }
+        default: break
         }
     }
 }

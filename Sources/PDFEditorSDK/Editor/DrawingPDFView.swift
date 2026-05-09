@@ -184,6 +184,18 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     private var savedPDFScrollDelaysContentTouches: Bool?
     /// Most recent keyboard end-frame in window coordinates; cleared when keyboard hides.
     private var lastKnownKeyboardFrame: CGRect = .zero
+    /// True while PDFKit is transitioning between form fields with the keyboard already visible.
+    /// Set on textDidEndEditing when keyboard is showing; cleared on textDidBeginEditing.
+    /// Suppresses go(to:rect:on:) during the transition so PDFKit's auto-scroll doesn't
+    /// jump past the newly focused field — scrollFocusedFormFieldAboveKeyboard handles it.
+    private var suppressFormFieldNavigation = false
+    /// KVO observer that pins contentOffset while switching between form fields with the
+    /// keyboard visible. UIScrollView's auto-scroll-to-first-responder and PDFKit's internal
+    /// navigation both ignore the keyboard area; locking the offset until textDidBegin fires
+    /// prevents any mid-transition jump. Released immediately before scrollFocusedFormFieldAboveKeyboard
+    /// runs so that function can apply the correct final position.
+    private var formFieldTransitionScrollObserver: NSKeyValueObservation?
+    private var formFieldTransitionSavedOffset: CGPoint?
     /// True while a finger touch is in progress. Cleared in touchesEnded/Cancelled so that
     /// handleTextSelectionChanged can tell whether a selection change is user-driven.
     private var isDirectTouchInProgress = false
@@ -304,7 +316,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     var textBoxTextColor: UIColor = .label
     var textBoxTextAlignment: NSTextAlignment = .left
     var textBoxVerticalAlignment: TextVerticalAlignment = .top
-    var textBoxAutoResize: Bool = false
     var textBoxBorderWidth: CGFloat = 0
     var textBoxBorderColor: UIColor = .black
 
@@ -1449,10 +1460,15 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         case .ended, .cancelled:
             guard let start = shapeStartPoint else { return }
             shapePreviewLayer.isHidden = true
+            let rawEnd = viewPoint
             shapeStartPoint = nil
-            let rectInView = rectFrom(start, to: viewPoint).insetBy(dx: -2, dy: -2)
-            if rectInView.width >= 20, rectInView.height >= 20 {
-                createOverlayShape(with: rectInView)
+            let isLineLike = currentShapeKind == .line || currentShapeKind == .arrow
+            let dragLen = hypot(rawEnd.x - start.x, rawEnd.y - start.y)
+            let framePadding = isLineLike ? ShapeBoxView.lineDrawingInset(for: currentShapeKind, lineWidth: shapeLineWidth) : 2
+            let rectInView = rectFrom(start, to: rawEnd).insetBy(dx: -framePadding, dy: -framePadding)
+            let validDrag = isLineLike ? dragLen >= 20 : (rectInView.width >= 20 && rectInView.height >= 20)
+            if validDrag {
+                createOverlayShape(with: rectInView, startPoint: start, endPoint: rawEnd)
             }
         default:
             break
@@ -1473,22 +1489,52 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
             path.close()
             shapePreviewLayer.path = path.cgPath
+        case .line:
+            let path = UIBezierPath()
+            path.move(to: start)
+            path.addLine(to: end)
+            shapePreviewLayer.path = path.cgPath
+        case .arrow:
+            shapePreviewLayer.path = arrowPreviewPath(from: start, to: end).cgPath
         }
     }
 
-    private func createOverlayShape(with rectInView: CGRect) {
+    private func arrowPreviewPath(from start: CGPoint, to end: CGPoint) -> UIBezierPath {
+        let path = UIBezierPath()
+        path.move(to: start)
+        path.addLine(to: end)
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let len = hypot(dx, dy)
+        guard len > 1 else { return path }
+        let angle = atan2(dy, dx)
+        let headLen: CGFloat = 20
+        let headAngle: CGFloat = .pi / 6
+        path.move(to: CGPoint(x: end.x - headLen * cos(angle - headAngle),
+                              y: end.y - headLen * sin(angle - headAngle)))
+        path.addLine(to: end)
+        path.addLine(to: CGPoint(x: end.x - headLen * cos(angle + headAngle),
+                                 y: end.y - headLen * sin(angle + headAngle)))
+        return path
+    }
+
+    private func createOverlayShape(with rectInView: CGRect, startPoint: CGPoint, endPoint: CGPoint) {
         guard let docView = documentView else { return }
         let rectInDoc = convert(rectInView, to: docView)
+        let isLineLike = currentShapeKind == .line || currentShapeKind == .arrow
+        let minDim: CGFloat = isLineLike ? 5 : 30
         let normalised = CGRect(
             origin: rectInDoc.origin,
-            size: CGSize(width: max(rectInDoc.width, 30), height: max(rectInDoc.height, 30))
+            size: CGSize(width: max(rectInDoc.width, minDim), height: max(rectInDoc.height, minDim))
         )
         let state = OverlayShapeState(
             id: UUID(),
             frame: normalised,
             kind: currentShapeKind,
             strokeColor: shapeStrokeColor,
-            lineWidth: shapeLineWidth
+            lineWidth: shapeLineWidth,
+            lineFlippedH: startPoint.x > endPoint.x,
+            lineFlippedV: startPoint.y > endPoint.y
         )
         addOverlayShape(from: state)
         formViewModel?.didMakeChange(.overlayShape(add: state, remove: nil))
@@ -1499,10 +1545,13 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     func addOverlayShape(from state: OverlayShapeState) {
         let box = ShapeBoxView(id: state.id, kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
         box.frame = state.frame
+        box.applyLineOrientation(flippedH: state.lineFlippedH, flippedV: state.lineFlippedV)
         box.setSelectMode(isSelectMode)
         box.onSelect = { [weak self] id in self?.selectShapeBox(id: id) }
         box.onEndChange = { [weak self] before, after in
-            guard before.frame != after.frame else { return }
+            let frameChanged = before.frame != after.frame
+            let flipChanged  = before.lineFlippedH != after.lineFlippedH || before.lineFlippedV != after.lineFlippedV
+            guard frameChanged || flipChanged else { return }
             self?.formViewModel?.didMakeChange(.overlayShapeUpdate(before: before, after: after))
         }
         textBoxOverlayView.addSubview(box)
@@ -1520,13 +1569,16 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     func overlayShapeState(id: UUID) -> OverlayShapeState? {
         guard let box = shapeBoxViews[id] else { return nil }
-        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        return OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind,
+            strokeColor: box.strokeColor, lineWidth: box.lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
     }
 
     func updateOverlayShape(from state: OverlayShapeState) {
         guard let box = shapeBoxViews[state.id] else { return }
         box.frame = state.frame
         box.applyStyle(kind: state.kind, strokeColor: state.strokeColor, lineWidth: state.lineWidth)
+        box.applyLineOrientation(flippedH: state.lineFlippedH, flippedV: state.lineFlippedV)
     }
 
     func applyImageBorderToSelected(borderWidth: CGFloat, borderColor: UIColor) {
@@ -1562,10 +1614,8 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.setTextColor(state.textColor)
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
-        box.setAutoResize(state.autoResizeEnabled)
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
         if selectedTextBoxID == state.id {
-            formViewModel?.selectedTextBoxAutoResize = state.autoResizeEnabled
             formViewModel?.selectedTextBoxBorderWidth = state.borderWidth
             formViewModel?.selectedTextBoxBorderColor = state.borderColor
         }
@@ -1573,9 +1623,13 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     func applyShapeStyleToSelected(kind: OverlayShapeKind, strokeColor: UIColor, lineWidth: CGFloat) {
         guard let id = selectedShapeID, let box = shapeBoxViews[id] else { return }
-        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind, strokeColor: box.strokeColor, lineWidth: box.lineWidth)
+        let before = OverlayShapeState(id: id, frame: box.frame, kind: box.shapeKind,
+            strokeColor: box.strokeColor, lineWidth: box.lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
         box.applyStyle(kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
-        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind, strokeColor: strokeColor, lineWidth: lineWidth)
+        let after = OverlayShapeState(id: id, frame: box.frame, kind: kind,
+            strokeColor: strokeColor, lineWidth: lineWidth,
+            lineFlippedH: box.lineFlippedH, lineFlippedV: box.lineFlippedV)
         if before.kind != after.kind || before.strokeColor != after.strokeColor || before.lineWidth != after.lineWidth {
             formViewModel?.didMakeChange(.overlayShapeUpdate(before: before, after: after))
         }
@@ -1624,7 +1678,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment,
-            autoResizeEnabled: textBoxAutoResize,
             borderWidth: textBoxBorderWidth,
             borderColor: textBoxBorderColor
         )
@@ -1633,26 +1686,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
     }
 
     /// Creates a minimal text box at a tap point that auto-expands horizontally as
-    /// the user types, growing up to the right edge of the underlying PDF page, then
-    /// wraps and expands vertically for new lines.
+    /// the user types, growing up to the right edge of the container, then wraps
+    /// and expands vertically for new lines.
     private func createTapTextBox(at viewPoint: CGPoint) {
         guard let docView = documentView else { return }
         let pointInDoc = docView.convert(viewPoint, from: self)
-
-        // Compute the right edge of the PDF page that was tapped, in document-view
-        // coordinates. This becomes the horizontal cap for the auto-resize.
-        let maxWidth: CGFloat
-        if let page = self.page(for: viewPoint, nearest: true) {
-            let pageBounds = page.bounds(for: .mediaBox)
-            // Use the vertical midpoint of the page so the X conversion is stable.
-            let pageRightInView = convert(
-                CGPoint(x: pageBounds.maxX, y: pageBounds.midY), from: page
-            )
-            let pageRightInDoc = docView.convert(pageRightInView, from: self)
-            maxWidth = max(80, pageRightInDoc.x - pointInDoc.x)
-        } else {
-            maxWidth = max(80, docView.bounds.width - pointInDoc.x)
-        }
 
         // Start with a single-line-height frame. The box expands as the user types.
         let lineHeight = textBoxFontSize + 12   // 6 pt top + 6 pt bottom padding
@@ -1673,15 +1711,14 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textColor: textBoxTextColor,
             textAlignment: textBoxTextAlignment,
             verticalAlignment: textBoxVerticalAlignment,
-            autoResizeEnabled: textBoxAutoResize,
             borderWidth: textBoxBorderWidth,
             borderColor: textBoxBorderColor
         )
-        addOverlayTextBox(from: state, beginEditing: true, tapCreateMaxWidth: maxWidth)
+        addOverlayTextBox(from: state, beginEditing: true)
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
     }
-    
-    func addOverlayTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false, tapCreateMaxWidth: CGFloat? = nil) {
+
+    func addOverlayTextBox(from state: OverlayTextBoxState, beginEditing: Bool = false) {
         let box = TextBoxView(id: state.id)
         box.frame = state.frame
         box.setText(state.text)
@@ -1690,11 +1727,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         box.setTextColor(state.textColor)
         box.setTextAlignment(state.textAlignment)
         box.setVerticalAlignment(state.verticalAlignment)
-        box.setAutoResize(state.autoResizeEnabled)
         box.updateBorder(width: state.borderWidth, color: state.borderColor)
-        if let maxWidth = tapCreateMaxWidth {
-            box.setTapCreateAutoResize(enabled: true, maxWidth: maxWidth)
-        }
         box.onSelect = { [weak self] id in
             self?.selectTextBox(id: id)
         }
@@ -1734,17 +1767,11 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             textColor: box.currentTextColor,
             textAlignment: box.currentTextAlignment,
             verticalAlignment: box.currentVerticalAlignment,
-            autoResizeEnabled: box.currentAutoResize,
             borderWidth: box.currentBorderWidth,
             borderColor: box.currentBorderColor
         )
     }
 
-    func setSelectedTextBoxAutoResize(_ enabled: Bool) {
-        guard let id = selectedTextBoxID, let box = textBoxViews[id] else { return }
-        box.setAutoResize(enabled)
-    }
-    
     func applyTextStyleToSelectedTextBox(fontSize: CGFloat, isBold: Bool, textColor: UIColor, backgroundColor: UIColor, textAlignment: NSTextAlignment, verticalAlignment: TextVerticalAlignment) {
         guard let selectedTextBoxID,
               let box = textBoxViews[selectedTextBoxID] else { return }
@@ -1867,7 +1894,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         deselectInkAnnotation()
         formViewModel?.selectedOverlayKind = .textBox
         if let box = textBoxViews[id] {
-            formViewModel?.selectedTextBoxAutoResize = box.currentAutoResize
             formViewModel?.selectedTextBoxBorderWidth = box.currentBorderWidth
             formViewModel?.selectedTextBoxBorderColor = box.currentBorderColor
             textBoxOverlayView.bringSubviewToFront(box)
@@ -2025,7 +2051,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 textColor: RGBAColor(box.currentTextColor),
                 textAlignment: box.currentTextAlignment.rawValue,
                 verticalAlignment: box.currentVerticalAlignment.rawValue,
-                autoResize: box.currentAutoResize ? true : nil,
+                autoResize: true,
                 borderWidth: box.currentBorderWidth > 0 ? box.currentBorderWidth : nil,
                 borderColor: box.currentBorderWidth > 0 ? RGBAColor(box.currentBorderColor) : nil
             )
@@ -2053,7 +2079,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 rect: RectCodable(pageInfo.pageRect),
                 kindRaw: box.shapeKind.rawValue,
                 strokeColor: RGBAColor(box.strokeColor),
-                lineWidth: box.lineWidth
+                lineWidth: box.lineWidth,
+                lineFlippedH: box.lineFlippedH ? true : nil,
+                lineFlippedV: box.lineFlippedV ? true : nil
             )
             shapeMetas.append(meta)
         }
@@ -2075,7 +2103,6 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 textColor: (text.textColor?.uiColor) ?? .label,
                 textAlignment: NSTextAlignment(rawValue: text.textAlignment ?? 0) ?? .left,
                 verticalAlignment: TextVerticalAlignment(rawValue: text.verticalAlignment ?? "") ?? .top,
-                autoResizeEnabled: text.autoResize ?? false,
                 borderWidth: text.borderWidth ?? 0,
                 borderColor: text.borderColor?.uiColor ?? .black
             )
@@ -2105,7 +2132,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                 frame: docRect,
                 kind: kind,
                 strokeColor: shape.strokeColor.uiColor,
-                lineWidth: shape.lineWidth
+                lineWidth: shape.lineWidth,
+                lineFlippedH: shape.lineFlippedH ?? false,
+                lineFlippedV: shape.lineFlippedV ?? false
             )
             addOverlayShape(from: state)
         }
@@ -2938,10 +2967,26 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
         if notification.name == UITextField.textDidBeginEditingNotification ||
             notification.name == UITextView.textDidBeginEditingNotification {
+            // Release the scroll lock set in textDidEndEditing so that
+            // scrollFocusedFormFieldAboveKeyboard can apply the correct final position,
+            // and allow go(to:rect:on:) to pass through again.
+            formFieldTransitionScrollObserver = nil
+            formFieldTransitionSavedOffset = nil
+            suppressFormFieldNavigation = false
             beginFormFieldEditSession(for: view)
-            // Keyboard may already be visible (user tapped a second field); scroll into view.
+            // When the keyboard is already visible the user has tapped a second field.
+            // PDFKit transiently activates an intermediate UITextField during the
+            // End→Begin transition, so pdfHostedTextInputWithFocus returns the wrong
+            // view immediately at Begin time. Deferring 100 ms lets PDFKit settle on
+            // the real first responder before we measure its position.
+            // keyboardWillShow (fired by iOS for every field activation) also calls
+            // scrollFocusedFormFieldAboveKeyboard; the deferred call below is a safety
+            // net for the rare case the keyboard frame doesn't change between fields.
             if !lastKnownKeyboardFrame.isEmpty {
-                scrollFocusedFormFieldAboveKeyboard(animationDuration: 0.25)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    guard let self, !self.lastKnownKeyboardFrame.isEmpty else { return }
+                    self.scrollFocusedFormFieldAboveKeyboard(animationDuration: 0.2)
+                }
             }
             DispatchQueue.main.async { [weak self, weak view] in
                 guard let self, let view else { return }
@@ -2957,6 +3002,25 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
                     notification.name == UITextView.textDidEndEditingNotification {
             commitFormWidgetText(from: view)
             recordActiveFormFieldChange(resetSession: false)
+            // If the keyboard is staying visible we're switching to another field.
+            // Lock the scroll offset so neither UIScrollView's auto-scroll-to-first-responder
+            // nor PDFKit's internal go(to:rect:on:) can jump the view to a position that
+            // ignores the keyboard area. The lock is released in textDidBeginEditing.
+            if !lastKnownKeyboardFrame.isEmpty, let sv = scrollView {
+                let savedOffset = sv.contentOffset
+                formFieldTransitionSavedOffset = savedOffset
+                suppressFormFieldNavigation = true
+                // Pin contentOffset via KVO so that UIScrollView's automatic
+                // scroll-to-first-responder behaviour (triggered when the old
+                // field resigns and the new one becomes first responder) cannot
+                // move the page away from its current keyboard-adjusted position.
+                // The observer is released in textDidBeginEditing once PDFKit
+                // has finished its internal field-switch bookkeeping.
+                formFieldTransitionScrollObserver = sv.observe(\.contentOffset, options: .new) { [weak sv] _, change in
+                    guard let sv, let newOffset = change.newValue, newOffset != savedOffset else { return }
+                    sv.setContentOffset(savedOffset, animated: false)
+                }
+            }
         }
 
         scheduleFormWidgetTextSync()
@@ -2989,6 +3053,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
         recordFormFieldChanges()
         lastKnownKeyboardFrame = .zero
         savedTextBoxContentOffset = nil
+        suppressFormFieldNavigation = false
+        formFieldTransitionScrollObserver = nil
+        formFieldTransitionSavedOffset = nil
 
         // Keyboard can hide while a widget stays first responder (e.g. iPad); re-sync from the view tree.
         if isFormMode {
@@ -3170,6 +3237,12 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
 
     override func go(to rect: CGRect, on page: PDFPage) {
         if shouldInterceptAllTouches || suppressGoTo { return }
+        // Suppress PDFKit's built-in scroll-to-annotation while a field switch is in
+        // progress (keyboard visible, End→Begin transition). PDFKit's rect ignores the
+        // keyboard area and would scroll the field off-screen. The KVO lock on
+        // contentOffset and the deferred scrollFocusedFormFieldAboveKeyboard call in
+        // formHostedTextInputEditingChanged handle positioning correctly instead.
+        if suppressFormFieldNavigation { return }
         super.go(to: rect, on: page)
     }
 

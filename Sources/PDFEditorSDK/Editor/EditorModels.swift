@@ -40,6 +40,8 @@ enum OverlayShapeKind: String, Codable {
     case circle
     case rectangle
     case triangle
+    case line
+    case arrow
 }
 
 enum TextVerticalAlignment: String, Codable {
@@ -62,7 +64,6 @@ struct OverlayTextBoxState: Identifiable {
     var textColor: UIColor
     var textAlignment: NSTextAlignment = .left
     var verticalAlignment: TextVerticalAlignment = .top
-    var autoResizeEnabled: Bool = false
     var borderWidth: CGFloat = 0
     var borderColor: UIColor = .black
 }
@@ -81,6 +82,10 @@ struct OverlayShapeState: Identifiable {
     var kind: OverlayShapeKind
     var strokeColor: UIColor
     var lineWidth: CGFloat
+    /// For .line and .arrow: true when the start point is on the right side of the bounding frame.
+    var lineFlippedH: Bool = false
+    /// For .line and .arrow: true when the start point is below the end point.
+    var lineFlippedV: Bool = false
 }
 
 struct OverlayDocumentMetadata: Codable {
@@ -135,6 +140,8 @@ struct OverlayShapeMeta: Codable {
     var kindRaw: String
     var strokeColor: RGBAColor
     var lineWidth: CGFloat
+    var lineFlippedH: Bool?   // nil = legacy (defaults to false)
+    var lineFlippedV: Bool?
 }
 
 struct RectCodable: Codable {

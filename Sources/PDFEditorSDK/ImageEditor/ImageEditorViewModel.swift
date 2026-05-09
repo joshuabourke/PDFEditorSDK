@@ -12,85 +12,96 @@ import SwiftUI
 @Observable
 class ImageEditorViewModel {
     private var preferences: EditorPreferences
-    
+    private let preferencesScope: EditorPreferencesScope = .image
+
+    private func persistPreferences() {
+        preferences.save(scope: preferencesScope)
+    }
+
     let sourceImage: UIImage
     var activeTool: EditorTool = .draw
     
     var inkColor: UIColor {
-        didSet { preferences.inkColor = RGBAColor(inkColor); preferences.save()}
+        didSet { preferences.inkColor = RGBAColor(inkColor); persistPreferences()}
     }
     var inkLineWidth: CGFloat {
-        didSet { preferences.inkLineWidth = inkLineWidth; preferences.save()}
+        didSet { preferences.inkLineWidth = inkLineWidth; persistPreferences()}
     }
     var isEraserMode: Bool { activeTool == .erase }
     var eraserRadius: CGFloat {
-        didSet { preferences.eraserRadius = eraserRadius; preferences.save()}
+        didSet { preferences.eraserRadius = eraserRadius; persistPreferences()}
     }
     var textBoxBackgroundColor: UIColor {
-        didSet { preferences.textBoxBackgroundColor = RGBAColor(textBoxBackgroundColor); preferences.save()}
+        didSet { preferences.textBoxBackgroundColor = RGBAColor(textBoxBackgroundColor); persistPreferences()}
     }
     var textBoxFontSize: CGFloat {
-        didSet { preferences.textBoxFontSize = textBoxFontSize; preferences.save()}
+        didSet {
+            if textBoxFontSize < 1 {
+                textBoxFontSize = 1
+                return
+            }
+            preferences.textBoxFontSize = textBoxFontSize
+            persistPreferences()
+        }
     }
     var textBoxIsBold: Bool {
-        didSet { preferences.textBoxIsBold = textBoxIsBold; preferences.save()}
+        didSet { preferences.textBoxIsBold = textBoxIsBold; persistPreferences()}
     }
     var textBoxTextColor: UIColor {
-        didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); preferences.save()}
+        didSet { preferences.textBoxTextColor = RGBAColor(textBoxTextColor); persistPreferences()}
     }
     var textBoxTextAlignment: NSTextAlignment {
-        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; preferences.save()}
+        didSet { preferences.textBoxTextAlignment = textBoxTextAlignment.rawValue; persistPreferences()}
     }
     var textBoxVerticalAlignment: TextVerticalAlignment {
-        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; preferences.save()}
-    }
-    var textBoxAutoResize: Bool {
-        didSet { preferences.textBoxAutoResize = textBoxAutoResize; preferences.save() }
+        didSet { preferences.textBoxVerticalAlignment = textBoxVerticalAlignment.rawValue; persistPreferences()}
     }
     var textBoxBorderWidth: CGFloat {
-        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; preferences.save() }
+        didSet { preferences.textBoxBorderWidth = textBoxBorderWidth; persistPreferences() }
     }
     var textBoxBorderColor: UIColor {
-        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); preferences.save() }
+        didSet { preferences.textBoxBorderColor = RGBAColor(textBoxBorderColor); persistPreferences() }
     }
-    var selectedTextBoxAutoResize: Bool = false
     var selectedTextBoxBorderWidth: CGFloat = 0
     var selectedTextBoxBorderColor: UIColor = .black
     var activeShapeKind: OverlayShapeKind {
-        didSet { preferences.activeShapeKind = activeShapeKind; preferences.save()}
+        didSet { preferences.activeShapeKind = activeShapeKind; persistPreferences()}
     }
     var shapeStrokeColor: UIColor {
-        didSet { preferences.shapeStrokeColor = RGBAColor(shapeStrokeColor); preferences.save()}
+        didSet { preferences.shapeStrokeColor = RGBAColor(shapeStrokeColor); persistPreferences()}
     }
     var shapeLineWidth: CGFloat {
-        didSet { preferences.shapeLineWidth = shapeLineWidth; preferences.save()}
+        didSet { preferences.shapeLineWidth = shapeLineWidth; persistPreferences()}
     }
     var imageBorderWidth: CGFloat {
-        didSet { preferences.imageBorderWidth = imageBorderWidth; preferences.save()}
+        didSet { preferences.imageBorderWidth = imageBorderWidth; persistPreferences()}
     }
     var imageBorderColor: UIColor {
-        didSet { preferences.imageBorderColor = RGBAColor(imageBorderColor); preferences.save()}
+        didSet { preferences.imageBorderColor = RGBAColor(imageBorderColor); persistPreferences()}
     }
     var drawWithFinger: Bool {
-        didSet { preferences.drawWithFinger = drawWithFinger; preferences.save() }
+        didSet { preferences.drawWithFinger = drawWithFinger; persistPreferences() }
     }
     var pencilOnlyAnnotations: Bool {
-        didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; preferences.save() }
+        didSet { preferences.pencilOnlyAnnotations = pencilOnlyAnnotations; persistPreferences() }
     }
     var pencilDoubleTapAction: PencilGestureAction {
-        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; preferences.save() }
+        didSet { preferences.pencilDoubleTapAction = pencilDoubleTapAction; persistPreferences() }
     }
     var pencilSqueezeAction: PencilGestureAction {
-        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; preferences.save() }
+        didSet { preferences.pencilSqueezeAction = pencilSqueezeAction; persistPreferences() }
     }
     var pencilDoubleSqueezeAction: PencilGestureAction {
-        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; preferences.save() }
+        didSet { preferences.pencilDoubleSqueezeAction = pencilDoubleSqueezeAction; persistPreferences() }
     }
     var toolbarCompact: Bool {
-        didSet { preferences.toolbarCompact = toolbarCompact; preferences.save() }
+        didSet { preferences.toolbarCompact = toolbarCompact; persistPreferences() }
+    }
+    var toolOptionsPresentation: ToolOptionsPresentation {
+        didSet { preferences.toolOptionsPresentation = toolOptionsPresentation; persistPreferences() }
     }
     var lineWidthInputStyle: LineWidthInputStyle {
-        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; preferences.save() }
+        didSet { preferences.lineWidthInputStyle = lineWidthInputStyle; persistPreferences() }
     }
     var lineWidthStep: CGFloat {
         didSet {
@@ -102,7 +113,7 @@ class ImageEditorViewModel {
                 return
             }
             preferences.lineWidthStep = p.lineWidthStep
-            preferences.save()
+            persistPreferences()
         }
     }
     var lineWidthMax: CGFloat {
@@ -115,7 +126,7 @@ class ImageEditorViewModel {
                 return
             }
             preferences.lineWidthMax = p.lineWidthMax
-            preferences.save()
+            persistPreferences()
         }
     }
     var previousTool: EditorTool? = nil
@@ -146,7 +157,7 @@ class ImageEditorViewModel {
         self.onSave = onSave
         self.onExport = onExport
         
-        let prefs = EditorPreferences.load()
+        let prefs = EditorPreferences.load(scope: preferencesScope)
         self.preferences = prefs
         
         self.inkColor = prefs.inkColor.uiColor
@@ -157,10 +168,9 @@ class ImageEditorViewModel {
         self.textBoxBackgroundColor = prefs.textBoxBackgroundColor.uiColor
         self.textBoxIsBold = prefs.textBoxIsBold
         self.textBoxTextColor = prefs.textBoxTextColor.uiColor
-        self.textBoxFontSize = prefs.textBoxFontSize
+        self.textBoxFontSize = max(1, prefs.textBoxFontSize)
         self.textBoxTextAlignment = NSTextAlignment(rawValue: prefs.textBoxTextAlignment) ?? .left
         self.textBoxVerticalAlignment = TextVerticalAlignment(rawValue: prefs.textBoxVerticalAlignment) ?? .top
-        self.textBoxAutoResize = prefs.textBoxAutoResize
         self.textBoxBorderWidth = prefs.textBoxBorderWidth
         self.textBoxBorderColor = prefs.textBoxBorderColor.uiColor
 
@@ -177,6 +187,7 @@ class ImageEditorViewModel {
         self.pencilSqueezeAction       = prefs.pencilSqueezeAction
         self.pencilDoubleSqueezeAction = prefs.pencilDoubleSqueezeAction
         self.toolbarCompact = prefs.toolbarCompact
+        self.toolOptionsPresentation = prefs.toolOptionsPresentation
 
         self.lineWidthInputStyle = prefs.lineWidthInputStyle
         self.lineWidthStep = prefs.lineWidthStep
@@ -235,15 +246,6 @@ class ImageEditorViewModel {
     func commitSelectedTextBoxBorderColor(_ color: UIColor) {
         selectedTextBoxBorderColor = color
         applyTextBorderToSelected()
-    }
-
-    func toggleSelectedTextBoxAutoResize() {
-        selectedTextBoxAutoResize.toggle()
-        applyAutoResizeToSelectedTextBox()
-    }
-
-    func applyAutoResizeToSelectedTextBox() {
-        canvasView?.setSelectedTextBoxAutoResize(selectedTextBoxAutoResize)
     }
 
     func commitImageBorderWidth(_ width: CGFloat) {

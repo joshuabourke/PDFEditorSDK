@@ -43,6 +43,7 @@ public struct PDFEditorView: View {
     private let showsHighlightButton: Bool
     private let showsLockButton: Bool
     private let showsPencilButton: Bool
+    private let showsSaveAlert: Bool
 
     /// - Parameters:
     ///   - url: The PDF document to open.
@@ -52,6 +53,8 @@ public struct PDFEditorView: View {
     ///   - showsHighlightButton: Whether to show the selected-text highlight button.
     ///   - showsLockButton: Whether to show the page scroll lock button.
     ///   - showsPencilButton: Whether to show the PencilKit button.
+    ///   - showsSaveAlert: Whether to show the confirmation alert after saving. Defaults to `true`.
+    ///     Set to `false` if your app already provides its own save confirmation UI.
     ///   - shouldHighlightFormField: Return `true` to show the blue highlight overlay for a field,
     ///     `false` to hide it. When `nil` (default), fields are highlighted unless they are
     ///     read-only (`isReadOnly`) or annotation-locked (`isAnnotationLocked`).
@@ -63,6 +66,7 @@ public struct PDFEditorView: View {
         showsHighlightButton: Bool = true,
         showsLockButton: Bool = true,
         showsPencilButton: Bool = true,
+        showsSaveAlert: Bool = true,
         shouldHighlightFormField: ((PDFFormFieldInfo) -> Bool)? = nil
     ) {
         _viewModel = State(
@@ -77,6 +81,7 @@ public struct PDFEditorView: View {
         self.showsHighlightButton = showsHighlightButton
         self.showsLockButton = showsLockButton
         self.showsPencilButton = showsPencilButton
+        self.showsSaveAlert = showsSaveAlert
     }
 
     public var body: some View {
@@ -85,7 +90,8 @@ public struct PDFEditorView: View {
             showsDismissButton: showsDismissButton,
             showsHighlightButton: showsHighlightButton,
             showsLockButton: showsLockButton,
-            showsPencilButton: showsPencilButton
+            showsPencilButton: showsPencilButton,
+            showsSaveAlert: showsSaveAlert
         )
     }
 }

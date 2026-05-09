@@ -64,6 +64,7 @@ struct PDFFormEditorView: View {
     var showsHighlightButton = true
     var showsLockButton = true
     var showsPencilButton = true
+    var showsSaveAlert = true
     var onSaveNavigate: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
     private var toolbarChipSize: CGSize {
@@ -101,6 +102,11 @@ struct PDFFormEditorView: View {
     @State private var showSelectShapeLineWidthPopover = false
     @State private var showSelectImageBorderWidthPopover = false
     @State private var showSelectTextBorderWidthPopover = false
+    @State private var showsActiveToolSubToolbar = false
+    @State private var showActiveDrawLineWidthPopover = false
+    @State private var showActiveTextBorderWidthPopover = false
+    @State private var showActiveShapeLineWidthPopover = false
+    @State private var showTextToolbarFontSizePopover = false
 
     ///This is tracking to see if the user has made changes to a document, this is used to display an alert if they attempt to exit without saving.
     @State private var changesNotSaved: Bool = false
@@ -151,6 +157,9 @@ struct PDFFormEditorView: View {
             .onChange(of: viewModel.activeShapeKind) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeStrokeColor) { _, _ in viewModel.applyShapeStyleToSelected() }
             .onChange(of: viewModel.shapeLineWidth) { _, _ in viewModel.applyShapeStyleToSelected() }
+            .onChange(of: viewModel.toolOptionsPresentation) { _, new in
+                if new == .longPressPopover { showsActiveToolSubToolbar = false }
+            }
             .alert("Unsaved Changes", isPresented: $changesNotSaved) {
                 Button("Save Changes") {
                     viewModel.savePDF()
@@ -230,7 +239,7 @@ struct PDFFormEditorView: View {
 
                 Button {
                     viewModel.savePDF()
-                    isShowingSaveAlert = true
+                    if showsSaveAlert { isShowingSaveAlert = true }
                     onSaveNavigate?()
                 } label: {
                     Text("Save")
@@ -360,50 +369,7 @@ struct PDFFormEditorView: View {
                         .padding(.top, toolbarDividerTopPadding)
                     
                     // MARK: Draw
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Draw")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Draw") {
-                            Image(systemName: "pencil.and.scribble")
-                                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(
-                            viewModel.isDrawingMode && !viewModel.isEraserMode
-                                ? Color.accentColor.opacity(0.3)
-                                : Color.secondary.opacity(0.1),
-                            in: .rect(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    if !viewModel.isDrawingMode { viewModel.setTool(.draw) }
-                                    showDrawOptions = true
-                                },
-                                TapGesture().onEnded {
-                                    viewModel.setTool(.draw)
-                                }
-                            )
-                        )
-                        .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
-                            DrawToolOptionsView(
-                                inkColor: Binding(
-                                    get: { Color(viewModel.inkColor) },
-                                    set: { viewModel.inkColor = UIColor($0) }
-                                ),
-                                inkLineWidth: $viewModel.inkLineWidth,
-                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                                lineWidthStep: viewModel.lineWidthStep,
-                                lineWidthMax: viewModel.lineWidthMax
-                            )
-                        }
-                    }
+                    drawToolbarSection
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
@@ -411,41 +377,7 @@ struct PDFFormEditorView: View {
                         .padding(.top, toolbarDividerTopPadding)
 
                     // MARK: Erase
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Erase")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Erase") {
-                            Image(systemName: "eraser")
-                                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(
-                            viewModel.isEraserMode
-                                ? Color.accentColor.opacity(0.3)
-                                : Color.secondary.opacity(0.1),
-                            in: .rect(cornerRadius: 8)
-                        )
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    viewModel.setTool(.erase)
-                                    showEraserOptions = true
-                                },
-                                TapGesture().onEnded {
-                                    viewModel.setTool(.erase)
-                                }
-                            )
-                        )
-                        .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
-                            EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
-                        }
-                    }
+                    eraseToolbarSection
 
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
@@ -453,56 +385,7 @@ struct PDFFormEditorView: View {
                         .padding(.top, toolbarDividerTopPadding)
 
                     // MARK: Text
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Text")
-                            .font(.caption2)
-                            .tracking(0.5)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        toolbarButtonContent("Text") {
-                            Image(systemName: "character.cursor.ibeam")
-                                .symbolVariant(viewModel.isTextMode ? .fill : .none)
-                                .fontWeight(.semibold)
-                        }
-                        .foregroundStyle(Color.accentColor)
-                        .padding(toolbarButtonPadding)
-                        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-                        .contentShape(Rectangle())
-                        .gesture(
-                            ExclusiveGesture(
-                                LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                                    if !viewModel.isTextMode { viewModel.setTool(.text) }
-                                    showTextOptions = true
-                                },
-                                TapGesture().onEnded { viewModel.setTool(.text) }
-                            )
-                        )
-                        .popover(isPresented: $showTextOptions, arrowEdge: .top) {
-                            TextToolOptionsView(
-                                textColor: Binding(
-                                    get: { Color(viewModel.textBoxTextColor) },
-                                    set: { viewModel.textBoxTextColor = UIColor($0) }
-                                ),
-                                backgroundColor: Binding(
-                                    get: { Color(viewModel.textBoxBackgroundColor) },
-                                    set: { viewModel.textBoxBackgroundColor = UIColor($0) }
-                                ),
-                                fontSize: $viewModel.textBoxFontSize,
-                                isBold: $viewModel.textBoxIsBold,
-                                textAlignment: $viewModel.textBoxTextAlignment,
-                                verticalAlignment: $viewModel.textBoxVerticalAlignment,
-                                autoResize: $viewModel.textBoxAutoResize,
-                                borderWidth: $viewModel.textBoxBorderWidth,
-                                borderColor: Binding(
-                                    get: { Color(viewModel.textBoxBorderColor) },
-                                    set: { viewModel.textBoxBorderColor = UIColor($0) }
-                                ),
-                                lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                                lineWidthStep: viewModel.lineWidthStep,
-                                lineWidthMax: viewModel.lineWidthMax
-                            )
-                        }
-                    }
+                    textToolbarSection
                     
                     Rectangle()
                         .fill(Color.secondary.opacity(0.25))
@@ -637,6 +520,7 @@ struct PDFFormEditorView: View {
                                 pencilSqueezeAction: $viewModel.pencilSqueezeAction,
                                 pencilDoubleSqueezeAction: $viewModel.pencilDoubleSqueezeAction,
                                 toolbarCompact: $viewModel.toolbarCompact,
+                                toolOptionsPresentation: $viewModel.toolOptionsPresentation,
                                 lineWidthInputStyle: $viewModel.lineWidthInputStyle,
                                 lineWidthStep: $viewModel.lineWidthStep,
                                 lineWidthMax: $viewModel.lineWidthMax
@@ -705,48 +589,582 @@ struct PDFFormEditorView: View {
             if showsSelectEditToolbar {
                 selectEditToolbar
                     .transition(.move(edge: .top).combined(with: .opacity))
+            } else if showsActiveToolSubToolbarPanel {
+                activeToolSubToolbar
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
         }//: VSTACK
         .animation(.easeInOut(duration: 0.2), value: showsSelectEditToolbar)
+        .animation(.easeInOut(duration: 0.2), value: showsActiveToolSubToolbarPanel)
         .animation(.easeInOut(duration: 0.2), value: viewModel.selectedOverlayKind)
+        .onChange(of: viewModel.activeTool) { _, new in
+            switch new {
+            case .draw, .erase, .text, .shape:
+                break
+            default:
+                showsActiveToolSubToolbar = false
+            }
+        }
         .contentBackgroundModifier()
     }
-    
+
+    private var showsActiveToolSubToolbarPanel: Bool {
+        viewModel.toolOptionsPresentation == .subToolbar
+            && showsActiveToolSubToolbar
+            && isActiveAnnotationTool(viewModel.activeTool)
+    }
+
+    private func isActiveAnnotationTool(_ tool: EditorTool) -> Bool {
+        switch tool {
+        case .draw, .erase, .text, .shape: return true
+        default: return false
+        }
+    }
+
+    private func annotationToolbarSecondTapInteraction(toolAlreadyActive: Bool, activate: () -> Void) {
+        if viewModel.toolOptionsPresentation == .subToolbar {
+            if toolAlreadyActive {
+                showsActiveToolSubToolbar.toggle()
+            } else {
+                activate()
+                showsActiveToolSubToolbar = true
+            }
+        } else {
+            activate()
+        }
+    }
+
+    private func handleDrawToolTap() {
+        annotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isDrawingMode && !viewModel.isEraserMode,
+            activate: { viewModel.setTool(.draw) }
+        )
+    }
+
+    private func handleEraseToolTap() {
+        annotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isEraserMode,
+            activate: { viewModel.setTool(.erase) }
+        )
+    }
+
+    private func handleTextToolTap() {
+        annotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isTextMode,
+            activate: { viewModel.setTool(.text) }
+        )
+    }
+
+    private func handleShapeToolTap() {
+        annotationToolbarSecondTapInteraction(
+            toolAlreadyActive: viewModel.isShapeMode,
+            activate: { viewModel.setTool(.shape) }
+        )
+    }
+
+    @ViewBuilder
+    private var drawToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Draw")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                drawToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isDrawingMode { viewModel.setTool(.draw) }
+                                showDrawOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.draw) }
+                        )
+                    )
+                    .popover(isPresented: $showDrawOptions, arrowEdge: .top) {
+                        DrawToolOptionsView(
+                            inkColor: Binding(
+                                get: { Color(viewModel.inkColor) },
+                                set: { viewModel.inkColor = UIColor($0) }
+                            ),
+                            inkLineWidth: $viewModel.inkLineWidth,
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                drawToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleDrawToolTap() })
+            }
+        }
+    }
+
+    private var drawToolChrome: some View {
+        toolbarButtonContent("Draw") {
+            Image(systemName: "pencil.and.scribble")
+                .symbolVariant(viewModel.isDrawingMode && !viewModel.isEraserMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(
+            viewModel.isDrawingMode && !viewModel.isEraserMode
+                ? Color.accentColor.opacity(0.3)
+                : Color.secondary.opacity(0.1),
+            in: .rect(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder
+    private var eraseToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Erase")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                eraseToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                viewModel.setTool(.erase)
+                                showEraserOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.erase) }
+                        )
+                    )
+                    .popover(isPresented: $showEraserOptions, arrowEdge: .top) {
+                        EraserToolOptionsView(eraserRadius: $viewModel.eraserRadius)
+                    }
+            } else {
+                eraseToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleEraseToolTap() })
+            }
+        }
+    }
+
+    private var eraseToolChrome: some View {
+        toolbarButtonContent("Erase") {
+            Image(systemName: "eraser")
+                .symbolVariant(viewModel.isEraserMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(
+            viewModel.isEraserMode
+                ? Color.accentColor.opacity(0.3)
+                : Color.secondary.opacity(0.1),
+            in: .rect(cornerRadius: 8)
+        )
+    }
+
+    @ViewBuilder
+    private var textToolbarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Text")
+                .font(.caption2)
+                .tracking(0.5)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                textToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isTextMode { viewModel.setTool(.text) }
+                                showTextOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.text) }
+                        )
+                    )
+                    .popover(isPresented: $showTextOptions, arrowEdge: .top) {
+                        TextToolOptionsView(
+                            textColor: Binding(
+                                get: { Color(viewModel.textBoxTextColor) },
+                                set: { viewModel.textBoxTextColor = UIColor($0) }
+                            ),
+                            backgroundColor: Binding(
+                                get: { Color(viewModel.textBoxBackgroundColor) },
+                                set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+                            ),
+                            fontSize: $viewModel.textBoxFontSize,
+                            isBold: $viewModel.textBoxIsBold,
+                            textAlignment: $viewModel.textBoxTextAlignment,
+                            verticalAlignment: $viewModel.textBoxVerticalAlignment,
+                            borderWidth: $viewModel.textBoxBorderWidth,
+                            borderColor: Binding(
+                                get: { Color(viewModel.textBoxBorderColor) },
+                                set: { viewModel.textBoxBorderColor = UIColor($0) }
+                            ),
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                textToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleTextToolTap() })
+            }
+        }
+    }
+
+    private var textToolChrome: some View {
+        toolbarButtonContent("Text") {
+            Image(systemName: "character.cursor.ibeam")
+                .symbolVariant(viewModel.isTextMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(viewModel.isTextMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+    }
+
     @ViewBuilder
     private var shapeToolSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Shape")
                 .font(.caption2).tracking(0.5).fontWeight(.semibold).foregroundStyle(.secondary)
-            toolbarButtonContent("Shape") {
-                Image(systemName: iconName(for: viewModel.activeShapeKind))
-                    .symbolVariant(viewModel.isShapeMode ? .fill : .none)
-                    .fontWeight(.semibold)
+            if viewModel.toolOptionsPresentation == .longPressPopover {
+                shapeToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(
+                        ExclusiveGesture(
+                            LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                                if !viewModel.isShapeMode { viewModel.setTool(.shape) }
+                                showShapeOptions = true
+                            },
+                            TapGesture().onEnded { viewModel.setTool(.shape) }
+                        )
+                    )
+                    .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
+                        ShapeToolOptionsView(
+                            shapeKind: $viewModel.activeShapeKind,
+                            strokeColor: Binding(
+                                get: { Color(viewModel.shapeStrokeColor) },
+                                set: { viewModel.shapeStrokeColor = UIColor($0) }
+                            ),
+                            lineWidth: $viewModel.shapeLineWidth,
+                            lineWidthInputStyle: viewModel.lineWidthInputStyle,
+                            lineWidthStep: viewModel.lineWidthStep,
+                            lineWidthMax: viewModel.lineWidthMax
+                        )
+                    }
+            } else {
+                shapeToolChrome
+                    .contentShape(Rectangle())
+                    .gesture(TapGesture().onEnded { handleShapeToolTap() })
             }
-            .foregroundStyle(Color.accentColor)
-            .padding(toolbarButtonPadding)
-            .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
-            .contentShape(Rectangle())
-            .gesture(
-                ExclusiveGesture(
-                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
-                        if !viewModel.isShapeMode { viewModel.setTool(.shape) }
-                        showShapeOptions = true
-                    },
-                    TapGesture().onEnded { viewModel.setTool(.shape) }
+        }
+    }
+
+    private var shapeToolChrome: some View {
+        toolbarButtonContent("Shape") {
+            Image(systemName: iconName(for: viewModel.activeShapeKind))
+                .symbolVariant(viewModel.isShapeMode ? .fill : .none)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+        .padding(toolbarButtonPadding)
+        .background(viewModel.isShapeMode ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.1), in: .rect(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var activeToolSubToolbar: some View {
+        HStack(alignment: .center, spacing: 8) {
+            switch viewModel.activeTool {
+            case .draw:
+                activeDrawSubtools
+            case .erase:
+                activeEraserSubtools
+            case .text:
+                activeTextSubtoolsForDrawingDefaults
+            case .shape:
+                activeShapeSubtoolsForDrawingDefaults
+            default:
+                EmptyView()
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.08), in: .rect(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private var activeDrawSubtools: some View {
+        ToolbarSubtoolsScrollRow {
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.inkColor) },
+                set: { viewModel.inkColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("1pt") { viewModel.inkLineWidth = 1 }
+                            Button("3pt") { viewModel.inkLineWidth = 3 }
+                            Button("6pt") { viewModel.inkLineWidth = 6 }
+                        }
+                    } label: {
+                        activeDrawLineWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showActiveDrawLineWidthPopover = true
+                    } label: {
+                        activeDrawLineWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showActiveDrawLineWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: $viewModel.inkLineWidth,
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: false,
+                            title: "Line width"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeDrawLineWidthChipLabel: some View {
+        selectEditToolbarChip("Line width") {
+            Image(systemName: "lineweight").fontWeight(.semibold)
+            Text(
+                LineWidthFormatting.shapeStrokeLabel(
+                    viewModel.inkLineWidth,
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep
                 )
             )
-            .popover(isPresented: $showShapeOptions, arrowEdge: .top) {
-                ShapeToolOptionsView(
-                    shapeKind: $viewModel.activeShapeKind,
-                    strokeColor: Binding(
-                        get: { Color(viewModel.shapeStrokeColor) },
-                        set: { viewModel.shapeStrokeColor = UIColor($0) }
+            .fontWeight(.semibold)
+        }
+        .foregroundStyle(Color.accentColor)
+    }
+
+    @ViewBuilder
+    private var activeEraserSubtools: some View {
+        ToolbarSubtoolsScrollRow {
+            Menu {
+                MenuScrollableActions {
+                    Button("6pt") { viewModel.eraserRadius = 6 }
+                    Button("9pt") { viewModel.eraserRadius = 9 }
+                    Button("13pt") { viewModel.eraserRadius = 13 }
+                    Button("18pt") { viewModel.eraserRadius = 18 }
+                    Button("24pt") { viewModel.eraserRadius = 24 }
+                }
+            } label: {
+                selectEditToolbarChip("Eraser size") {
+                    Image(systemName: "circle.dotted").fontWeight(.semibold)
+                    Text("\(Int(viewModel.eraserRadius))pt")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeTextSubtoolsForDrawingDefaults: some View {
+        ToolbarSubtoolsScrollRow {
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxTextColor) },
+                set: { viewModel.textBoxTextColor = UIColor($0) }
+            )) {
+                selectEditToolbarChip("Text color") {
+                    Image(systemName: "textformat")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Color(viewModel.textBoxTextColor))
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            ColorPicker(selection: Binding(
+                get: { Color(viewModel.textBoxBackgroundColor) },
+                set: { viewModel.textBoxBackgroundColor = UIColor($0) }
+            ), supportsOpacity: true) {
+                selectEditToolbarChip("Background color") {
+                    ZStack {
+                        Image(systemName: "rectangle")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "rectangle.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Color(viewModel.textBoxBackgroundColor))
+                    }
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            textToolbarFontSizeControl
+
+            Button { viewModel.textBoxIsBold.toggle() } label: {
+                selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
+                    Image(systemName: "bold").fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            Menu {
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxTextAlignment = .left
+                    } label: {
+                        Label("Leading", systemImage: "text.alignleft")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .center
+                    } label: {
+                        Label("Center", systemImage: "text.aligncenter")
+                    }
+                    Button {
+                        viewModel.textBoxTextAlignment = .right
+                    } label: {
+                        Label("Trailing", systemImage: "text.alignright")
+                    }
+                }
+            } label: {
+                selectEditToolbarChip("Text alignment") {
+                    Image(systemName: alignmentIcon(for: viewModel.textBoxTextAlignment))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+            Menu {
+                MenuScrollableActions {
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .top
+                    } label: {
+                        Label("Top", systemImage: "arrow.up.to.line")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .middle
+                    } label: {
+                        Label("Middle", systemImage: "arrow.up.and.down")
+                    }
+                    Button {
+                        viewModel.textBoxVerticalAlignment = .bottom
+                    } label: {
+                        Label("Bottom", systemImage: "arrow.down.to.line")
+                    }
+                }
+            } label: {
+                selectEditToolbarChip("Vertical alignment") {
+                    Image(systemName: verticalAlignmentIcon(for: viewModel.textBoxVerticalAlignment))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            Button {
+                showActiveTextBorderWidthPopover = true
+            } label: {
+                activeDefaultTextBoxBorderWidthChipLabel
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: $showActiveTextBorderWidthPopover, arrowEdge: .top) {
+                ToolbarBorderWidthColorPanel(
+                    width: $viewModel.textBoxBorderWidth,
+                    color: Binding(
+                        get: { Color(viewModel.textBoxBorderColor) },
+                        set: { viewModel.textBoxBorderColor = UIColor($0) }
                     ),
-                    lineWidth: $viewModel.shapeLineWidth,
-                    lineWidthInputStyle: viewModel.lineWidthInputStyle,
-                    lineWidthStep: viewModel.lineWidthStep,
-                    lineWidthMax: viewModel.lineWidthMax
+                    style: viewModel.lineWidthInputStyle,
+                    step: viewModel.lineWidthStep,
+                    max: viewModel.lineWidthMax,
+                    title: "Text box border"
                 )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activeDefaultTextBoxBorderWidthChipLabel: some View {
+        selectEditToolbarChip("Text box border width", isActive: viewModel.textBoxBorderWidth > 0) {
+            Image(systemName: "square.dashed").fontWeight(.semibold)
+            Text(defaultTextBoxBorderWidthLabel)
+                .fontWeight(.semibold)
+        }
+        .foregroundStyle(defaultTextBoxBorderControlColor)
+    }
+
+    private var defaultTextBoxBorderWidthLabel: String {
+        guard viewModel.textBoxBorderWidth > 0 else { return "No" }
+        return LineWidthFormatting.toolbarPointsLabel(
+            viewModel.textBoxBorderWidth,
+            style: viewModel.lineWidthInputStyle,
+            step: viewModel.lineWidthStep
+        )
+    }
+
+    private var defaultTextBoxBorderControlColor: Color {
+        viewModel.textBoxBorderWidth > 0 ? Color(viewModel.textBoxBorderColor) : Color.accentColor
+    }
+
+    @ViewBuilder
+    private var activeShapeSubtoolsForDrawingDefaults: some View {
+        ToolbarSubtoolsScrollRow {
+            Menu {
+                shapeKindMenuActions
+            } label: {
+                selectEditToolbarChip("Shape kind") {
+                    Image(systemName: iconName(for: viewModel.activeShapeKind))
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(Color.accentColor)
+            }
+
+            ColorPicker("", selection: Binding(
+                get: { Color(viewModel.shapeStrokeColor) },
+                set: { viewModel.shapeStrokeColor = UIColor($0) }
+            ))
+            .labelsHidden()
+            .frame(width: selectEditToolbarChipSize.width, height: selectEditToolbarChipSize.height)
+            .background(toolbarChipBackground())
+            Group {
+                if viewModel.lineWidthInputStyle == .presetButtons {
+                    Menu {
+                        MenuScrollableActions {
+                            Button("Thin (1pt)") { viewModel.shapeLineWidth = 1 }
+                            Button("Medium (2pt)") { viewModel.shapeLineWidth = 2 }
+                            Button("Thick (4pt)") { viewModel.shapeLineWidth = 4 }
+                            Button("Heavy (6pt)") { viewModel.shapeLineWidth = 6 }
+                        }
+                    } label: {
+                        selectShapeLineWidthChipLabel
+                    }
+                } else {
+                    Button {
+                        showActiveShapeLineWidthPopover = true
+                    } label: {
+                        selectShapeLineWidthChipLabel
+                    }
+                    .buttonStyle(.plain)
+                    .popover(isPresented: $showActiveShapeLineWidthPopover, arrowEdge: .top) {
+                        ToolbarLineWidthStepperPanel(
+                            width: $viewModel.shapeLineWidth,
+                            step: viewModel.lineWidthStep,
+                            max: viewModel.lineWidthMax,
+                            allowsZero: false,
+                            title: "Stroke width"
+                        )
+                    }
+                }
             }
         }
     }
@@ -927,22 +1345,8 @@ struct PDFFormEditorView: View {
                 .foregroundStyle(Color.accentColor)
             }
 
-            Menu {
-                MenuScrollableActions {
-                    Button("Small (12pt)") { viewModel.textBoxFontSize = 12 }
-                    Button("Medium (14pt)") { viewModel.textBoxFontSize = 14 }
-                    Button("Large (18pt)") { viewModel.textBoxFontSize = 18 }
-                    Button("XL (22pt)") { viewModel.textBoxFontSize = 22 }
-                }
-            } label: {
-                selectEditToolbarChip("Font size") {
-                    Image(systemName: "textformat.size").fontWeight(.semibold)
-                    Text("\(Int(viewModel.textBoxFontSize))pt")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(Color.accentColor)
-            }
+            textToolbarFontSizeControl
+
             Button { viewModel.textBoxIsBold.toggle() } label: {
                 selectEditToolbarChip("Bold", isActive: viewModel.textBoxIsBold) {
                     Image(systemName: "bold").fontWeight(.semibold)
@@ -1000,15 +1404,6 @@ struct PDFFormEditorView: View {
                 }
                 .foregroundStyle(Color.accentColor)
             }
-
-            Button { viewModel.toggleSelectedTextBoxAutoResize() } label: {
-                selectEditToolbarChip("Auto size", isActive: viewModel.selectedTextBoxAutoResize) {
-                    Image(systemName: "arrow.up.and.down")
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(Color.accentColor)
-            }
-            .buttonStyle(.plain)
 
             Button {
                 showSelectTextBorderWidthPopover = true
@@ -1154,6 +1549,34 @@ struct PDFFormEditorView: View {
         } label: {
             Label("Triangle", systemImage: iconName(for: .triangle))
         }
+        Button {
+            viewModel.activeShapeKind = .line
+        } label: {
+            Label("Line", systemImage: iconName(for: .line))
+        }
+        Button {
+            viewModel.activeShapeKind = .arrow
+        } label: {
+            Label("Arrow", systemImage: iconName(for: .arrow))
+        }
+    }
+
+    private var textToolbarFontSizeControl: some View {
+        Button {
+            showTextToolbarFontSizePopover = true
+        } label: {
+            selectEditToolbarChip("Font size") {
+                Image(systemName: "textformat.size").fontWeight(.semibold)
+                Text("\(Int(viewModel.textBoxFontSize))pt")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+            }
+            .foregroundStyle(Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showTextToolbarFontSizePopover, arrowEdge: .top) {
+            ToolbarFontSizeStepperPanel(fontSize: $viewModel.textBoxFontSize)
+        }
     }
 
     private func toolbarChip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -1216,6 +1639,8 @@ struct PDFFormEditorView: View {
         case .circle: return "circle"
         case .rectangle: return "rectangle"
         case .triangle: return "triangle"
+        case .line: return "line.diagonal"
+        case .arrow: return "arrow.up.right"
         }
     }
 
@@ -1224,6 +1649,8 @@ struct PDFFormEditorView: View {
         case .circle: return "Circle"
         case .rectangle: return "Rect"
         case .triangle: return "Tri"
+        case .line: return "Line"
+        case .arrow: return "Arrow"
         }
     }
 }
@@ -1370,7 +1797,6 @@ struct SimplePDFView: UIViewRepresentable {
         pdfView.textBoxTextColor = viewModel.textBoxTextColor
         pdfView.textBoxTextAlignment = viewModel.textBoxTextAlignment
         pdfView.textBoxVerticalAlignment = viewModel.textBoxVerticalAlignment
-        pdfView.textBoxAutoResize = viewModel.textBoxAutoResize
         pdfView.textBoxBorderWidth = viewModel.textBoxBorderWidth
         pdfView.textBoxBorderColor = viewModel.textBoxBorderColor
         pdfView.isShapeMode = viewModel.activeTool == .shape
