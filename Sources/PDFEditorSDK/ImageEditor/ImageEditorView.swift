@@ -499,15 +499,9 @@ struct ImageFormEditorView: View {
     }
 
     private func imageAnnotationToolbarSecondTapInteraction(toolAlreadyActive: Bool, activate: () -> Void) {
+        activate()
         if viewModel.toolOptionsPresentation == .subToolbar {
-            if toolAlreadyActive {
-                showsActiveToolSubToolbar.toggle()
-            } else {
-                activate()
-                showsActiveToolSubToolbar = true
-            }
-        } else {
-            activate()
+            showsActiveToolSubToolbar = !toolAlreadyActive
         }
     }
 
@@ -2728,6 +2722,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             imageBoxViews.values.forEach { $0.setSelectMode(false) }
             shapeBoxViews.values.forEach { $0.setSelectMode(false) }
             endTextEditing()
+            textBoxViews.values.forEach { $0.hideCursorForExport() }
         }
 
         let imgRect = imageContentRect
@@ -2750,7 +2745,10 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
 
     private func restoreSelectMode() {
         // Restore the current select-mode state on all overlay boxes after export.
-        textBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
+        textBoxViews.values.forEach {
+            $0.setSelectMode(isSelectMode)
+            $0.restoreCursorAfterExport()
+        }
         imageBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
         shapeBoxViews.values.forEach { $0.setSelectMode(isSelectMode) }
         // Re-apply current selection highlight if still in select mode

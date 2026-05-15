@@ -344,6 +344,14 @@ final class TextBoxView: UIView, UITextViewDelegate, UIScribbleInteractionDelega
         }
     }
 
+    func hideCursorForExport() {
+        textView.tintColor = .clear
+    }
+
+    func restoreCursorAfterExport() {
+        textView.tintColor = nil
+    }
+
     func setSelected(_ selected: Bool) {
         isSelected = selected
         updateSelectionUI()

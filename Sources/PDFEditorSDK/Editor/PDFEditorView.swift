@@ -212,6 +212,7 @@ struct PDFFormEditorView: View {
             if showsDismissButton {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
+                        viewModel.flushActiveFormFieldChangesIfNeeded()
                         if !viewModel.undoStack.isEmpty {
                             changesNotSaved.toggle()
                         } else {
@@ -622,15 +623,9 @@ struct PDFFormEditorView: View {
     }
 
     private func annotationToolbarSecondTapInteraction(toolAlreadyActive: Bool, activate: () -> Void) {
+        activate()
         if viewModel.toolOptionsPresentation == .subToolbar {
-            if toolAlreadyActive {
-                showsActiveToolSubToolbar.toggle()
-            } else {
-                activate()
-                showsActiveToolSubToolbar = true
-            }
-        } else {
-            activate()
+            showsActiveToolSubToolbar = !toolAlreadyActive
         }
     }
 

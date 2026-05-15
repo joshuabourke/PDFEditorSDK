@@ -645,6 +645,10 @@ class PDFFormViewModel {
         didMakeChange(.deleteInkAnnotation(annotation: annotation, page: page))
     }
     
+    func flushActiveFormFieldChangesIfNeeded() {
+        pdfView?.flushPendingFormFieldUndoTracking()
+    }
+
     @discardableResult
     func savePDF() -> URL? {
         guard let document = pdfDocument else { return nil }
