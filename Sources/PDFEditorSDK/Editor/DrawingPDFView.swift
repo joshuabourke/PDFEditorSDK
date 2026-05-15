@@ -1537,6 +1537,7 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             lineFlippedV: startPoint.y > endPoint.y
         )
         addOverlayShape(from: state)
+        selectedShapeID = state.id
         formViewModel?.didMakeChange(.overlayShape(add: state, remove: nil))
     }
 
@@ -1682,6 +1683,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             borderColor: textBoxBorderColor
         )
         addOverlayTextBox(from: state, beginEditing: true)
+        selectedTextBoxID = state.id
+        formViewModel?.selectedTextBoxBorderWidth = state.borderWidth
+        formViewModel?.selectedTextBoxBorderColor = state.borderColor
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
     }
 
@@ -1715,6 +1719,9 @@ class DrawingPDFView: PDFView, UIIndirectScribbleInteractionDelegate, PencilDraw
             borderColor: textBoxBorderColor
         )
         addOverlayTextBox(from: state, beginEditing: true)
+        selectedTextBoxID = state.id
+        formViewModel?.selectedTextBoxBorderWidth = state.borderWidth
+        formViewModel?.selectedTextBoxBorderColor = state.borderColor
         formViewModel?.didMakeChange(.overlayTextBox(add: state, remove: nil))
     }
 

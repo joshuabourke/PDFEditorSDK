@@ -1074,10 +1074,20 @@ struct PDFFormEditorView: View {
             .buttonStyle(.plain)
             .popover(isPresented: $showActiveTextBorderWidthPopover, arrowEdge: .top) {
                 ToolbarBorderWidthColorPanel(
-                    width: $viewModel.textBoxBorderWidth,
+                    width: Binding(
+                        get: { viewModel.textBoxBorderWidth },
+                        set: { v in
+                            viewModel.textBoxBorderWidth = v
+                            viewModel.commitSelectedTextBoxBorderWidth(v)
+                        }
+                    ),
                     color: Binding(
                         get: { Color(viewModel.textBoxBorderColor) },
-                        set: { viewModel.textBoxBorderColor = UIColor($0) }
+                        set: { v in
+                            let c = UIColor(v)
+                            viewModel.textBoxBorderColor = c
+                            viewModel.commitSelectedTextBoxBorderColor(c)
+                        }
                     ),
                     style: viewModel.lineWidthInputStyle,
                     step: viewModel.lineWidthStep,
@@ -1085,6 +1095,8 @@ struct PDFFormEditorView: View {
                     title: "Text box border"
                 )
             }
+
+            deleteSelectionButton
         }
     }
 
@@ -1161,6 +1173,8 @@ struct PDFFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectionButton
         }
     }
 

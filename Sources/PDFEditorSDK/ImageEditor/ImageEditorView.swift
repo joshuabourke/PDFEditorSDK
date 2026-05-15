@@ -943,10 +943,20 @@ struct ImageFormEditorView: View {
             .buttonStyle(.plain)
             .popover(isPresented: $showActiveTextBorderWidthPopover, arrowEdge: .top) {
                 ToolbarBorderWidthColorPanel(
-                    width: $viewModel.textBoxBorderWidth,
+                    width: Binding(
+                        get: { viewModel.textBoxBorderWidth },
+                        set: { v in
+                            viewModel.textBoxBorderWidth = v
+                            viewModel.commitSelectedTextBoxBorderWidth(v)
+                        }
+                    ),
                     color: Binding(
                         get: { Color(viewModel.textBoxBorderColor) },
-                        set: { viewModel.textBoxBorderColor = UIColor($0) }
+                        set: { v in
+                            let c = UIColor(v)
+                            viewModel.textBoxBorderColor = c
+                            viewModel.commitSelectedTextBoxBorderColor(c)
+                        }
                     ),
                     style: viewModel.lineWidthInputStyle,
                     step: viewModel.lineWidthStep,
@@ -954,6 +964,8 @@ struct ImageFormEditorView: View {
                     title: "Text box border"
                 )
             }
+
+            deleteSelectedObjectButton
         }
     }
 
@@ -1028,6 +1040,8 @@ struct ImageFormEditorView: View {
                     }
                 }
             }
+
+            deleteSelectedObjectButton
         }
     }
 
@@ -1758,6 +1772,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     private var selectedTextBoxID: UUID?
     private var selectedImageBoxID: UUID?
     private var selectedShapeID: UUID?
+    private var lastImageContentRect: CGRect = .zero
     private var shapePanGesture: UIPanGestureRecognizer?
     private var shapeStartPoint: CGPoint?
     private let shapePreviewLayer = CAShapeLayer()
@@ -1948,6 +1963,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
     // MARK: - Layout
 
     override func layoutSubviews() {
+        let oldRect = lastImageContentRect
         super.layoutSubviews()
         imageView.frame = bounds
         inkCanvas.frame = bounds
@@ -1963,8 +1979,47 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
         imageBorderLayer.frame = bounds
         CATransaction.commit()
 
+        if oldRect != .zero && imgRect != .zero && oldRect != imgRect {
+            remapAnnotations(from: oldRect, to: imgRect)
+        }
+        lastImageContentRect = imgRect
+
         inkCanvas.strokes = strokes
         inkCanvas.setNeedsDisplay()
+    }
+
+    // MARK: - Annotation Remapping
+
+    private func remapAnnotations(from old: CGRect, to new: CGRect) {
+        let scaleX = new.width / old.width
+        let scaleY = new.height / old.height
+        let lineScale = min(scaleX, scaleY)
+        for index in strokes.indices {
+            strokes[index].points = strokes[index].points.map { remapPoint($0, from: old, to: new) }
+            strokes[index].lineWidth *= lineScale
+        }
+        for (_, box) in textBoxViews {
+            box.frame = remapRect(box.frame, from: old, to: new)
+        }
+        for (_, box) in imageBoxViews {
+            box.frame = remapRect(box.frame, from: old, to: new)
+        }
+        for (_, box) in shapeBoxViews {
+            box.frame = remapRect(box.frame, from: old, to: new)
+        }
+    }
+
+    private func remapPoint(_ point: CGPoint, from old: CGRect, to new: CGRect) -> CGPoint {
+        let normalX = (point.x - old.minX) / old.width
+        let normalY = (point.y - old.minY) / old.height
+        return CGPoint(x: new.minX + normalX * new.width, y: new.minY + normalY * new.height)
+    }
+
+    private func remapRect(_ rect: CGRect, from old: CGRect, to new: CGRect) -> CGRect {
+        let newOrigin = remapPoint(rect.origin, from: old, to: new)
+        let scaleX = new.width / old.width
+        let scaleY = new.height / old.height
+        return CGRect(origin: newOrigin, size: CGSize(width: rect.width * scaleX, height: rect.height * scaleY))
     }
 
     // MARK: - Image Content Rect
@@ -2283,6 +2338,7 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             lineFlippedV: startPoint.y > endPoint.y
         )
         addShapeBox(from: state)
+        selectedShapeID = state.id
         viewModel?.didMakeChange(.imageShape(add: state, remove: nil))
     }
 
@@ -2384,6 +2440,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             borderColor: textBoxBorderColor
         )
         addTextBox(from: state, beginEditing: true)
+        selectedTextBoxID = state.id
+        viewModel?.selectedTextBoxBorderWidth = state.borderWidth
+        viewModel?.selectedTextBoxBorderColor = state.borderColor
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
     }
 
@@ -2410,6 +2469,9 @@ class DrawingImageView: UIView, PencilDrawingGestureDelegate {
             borderColor: textBoxBorderColor
         )
         addTextBox(from: state, beginEditing: true)
+        selectedTextBoxID = state.id
+        viewModel?.selectedTextBoxBorderWidth = state.borderWidth
+        viewModel?.selectedTextBoxBorderColor = state.borderColor
         viewModel?.didMakeChange(.textBox(add: state, remove: nil))
     }
 
